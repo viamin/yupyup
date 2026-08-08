@@ -29,6 +29,7 @@ This creates an executable named `yup` in the project root.
 ./yup run examples/hello.yup
 ./yup run examples/comparison.yup
 ./yup run examples/booleans.yup
+./yup run examples/functions.yup
 ```
 
 Expected output:
@@ -55,8 +56,8 @@ puts hello("world")
 
 ## Current Capability
 
-The bootstrap supports a small slice: function definitions, function calls, immutable local bindings, integers, strings, booleans, `nil`, arithmetic/string operators (`+`, `-`, `*`, `/`), comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`), boolean operators (`and`, `or`, `not`), and `puts`.
+The bootstrap supports a small slice: function definitions, function calls, immutable local bindings, integers, strings, booleans, `nil`, arithmetic/string operators (`+`, `-`, `*`, `/`), comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`), boolean operators (`and`, `or`, `not`), `puts`, and anonymous functions/Ruby-shaped blocks (`{ |x| x * 2 }`) as first-class function values.
 
-It does not yet implement actors, types, formal verification, dot calls, blocks, collections, pattern matching, short-circuit boolean operators in the BEAM backend, or string interpolation.
+It does not yet implement actors, types, formal verification, dot calls, multiline `do ... end` blocks, collections, pattern matching, short-circuit boolean operators in the BEAM backend, or string interpolation.
 
 Read [docs/VISION.md](docs/VISION.md) for the larger experiment.

@@ -216,4 +216,59 @@ defmodule Yup.CompilerTest do
         assert error.message =~ "cannot rebind immutable name x"
     end
   end
+
+  test "binds and calls an anonymous function value" do
+    source = """
+    double = { |x| x * 2 }
+    puts double(4)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "block.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "8\n"
+  end
+
+  test "passes a function value as an argument to another function" do
+    source = """
+    def invoke(callback, value)
+      callback(value)
+    end
+
+    double = { |x| x * 2 }
+    puts invoke(double, 5)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "block.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "10\n"
+  end
+
+  test "supports anonymous functions with multiple parameters" do
+    source = """
+    add = { |x, y| x + y }
+    puts add(3, 4)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "block.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "7\n"
+  end
 end
