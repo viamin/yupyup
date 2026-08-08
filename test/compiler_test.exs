@@ -217,6 +217,124 @@ defmodule Yup.CompilerTest do
     end
   end
 
+  test "binds and calls an anonymous function value" do
+    source = """
+    double = { |x| x * 2 }
+    puts double(4)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "block.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "8\n"
+  end
+
+  test "passes a function value as an argument to another function" do
+    source = """
+    def invoke(callback, value)
+      callback(value)
+    end
+
+    double = { |x| x * 2 }
+    puts invoke(double, 5)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "block.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "10\n"
+  end
+
+  test "supports anonymous functions with multiple parameters" do
+    source = """
+    add = { |x, y| x + y }
+    puts add(3, 4)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "block.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "7\n"
+  end
+
+  test "rejects rebinding the reserved puts name" do
+    source = """
+    puts = { |x| x }
+    puts(42)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "rebind.yup")
+
+    assert_raise Yup.SourceError, ~r/cannot rebind immutable name puts/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects defining a top-level function with the reserved puts name" do
+    source = """
+    def puts()
+      1
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "rebind.yup")
+
+    assert_raise Yup.SourceError, ~r/cannot define function with reserved name puts/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects rebinding a top-level function name in the body" do
+    source = """
+    def foo()
+      1
+    end
+
+    foo = 42
+    foo()
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "rebind.yup")
+
+    assert_raise Yup.SourceError, ~r/cannot rebind immutable name foo/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects rebinding a top-level function name inside another function body" do
+    source = """
+    def foo()
+      1
+    end
+
+    def bar()
+      foo = 2
+      foo
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "rebind.yup")
+
+    assert_raise Yup.SourceError, ~r/cannot rebind immutable name foo/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
   test "executes match with literal integer patterns" do
     source = """
     match 42

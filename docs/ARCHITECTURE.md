@@ -29,11 +29,15 @@ YupYup AST
 
 `Yup.Parser` is a small hand-written parser. It preserves line and column locations on AST nodes. The parser is line-oriented for the first slice, but this is not a long-term grammar commitment.
 
-`Yup.AST.*` modules define explicit structs for programs, functions, calls, bindings, identifiers, literals, binary operations, and unary operations.
+`Yup.AST.*` modules define explicit structs for programs, functions, anonymous functions, calls, bindings, identifiers, literals, binary operations, unary operations, constructor expressions, `match` expressions, match clauses, and literal/binder/constructor patterns.
 
 `Yup.Compiler` owns compilation and execution orchestration.
 
 `Yup.Compiler.Erlang` lowers YupYup AST to Erlang abstract forms. The backend boundary is explicit so later backends, analyzers, and test helpers can inspect YupYup AST before lowering.
+
+`Yup.AST.AnonymousFunction` (the `{ |x| x * 2 }` block form) lowers to a plain Erlang `fun` expression, so blocks are ordinary first-class function values rather than a distinct kind of thing. Because a call like `name(args)` is syntactically ambiguous between invoking a top-level `def` and calling a bound function value, `Yup.Compiler.Erlang` tracks the set of top-level function names while lowering: calls to a known top-level function compile to a direct atom call, and every other call compiles to invoking whatever value the name is bound to (`Var(Args)` in Erlang terms).
+
+`Yup.AST.Match` lowers to an Erlang `case` expression; pattern AST nodes (`Yup.AST.LiteralPattern`, `Yup.AST.BinderPattern`, `Yup.AST.ConstructorPattern`) translate into Erlang patterns with a renaming pass that gives binder names a fresh suffix so nested matches do not collide with outer scope.
 
 `Yup.Runtime` contains tiny runtime helpers for operations whose semantics are YupYup-specific, such as string-aware `+` and `puts`.
 
@@ -51,7 +55,6 @@ Records are first-class immutable product types. Their declarations live on `Yup
 
 ## Open Tradeoffs
 
-The current parser is intentionally simple. It should be replaced or evolved when YupYup needs indentation/newline-sensitive Ruby-like syntax, better recovery, multiline expressions, blocks, and richer diagnostics.
+The current parser is intentionally simple. It should be replaced or evolved when YupYup needs indentation/newline-sensitive Ruby-like syntax, better recovery, multiline expressions, multiline `do ... end` blocks, and richer diagnostics.
 
 The runtime currently executes compiled modules in the current VM. Future compilation commands may want persistent `.beam` output, source maps, or isolated execution.
-

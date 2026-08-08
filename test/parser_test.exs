@@ -2,6 +2,7 @@ defmodule Yup.ParserTest do
   use ExUnit.Case, async: true
 
   alias Yup.AST.{
+    AnonymousFunction,
     BinaryOp,
     BinderPattern,
     Binding,
@@ -178,6 +179,70 @@ defmodule Yup.ParserTest do
   test "reports unexpected operator at end of expression" do
     assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("1 + ", path: "bad.yup")
     assert error.message =~ "unexpected end of expression"
+  end
+
+  test "parses an anonymous function literal as a first-class function value" do
+    assert {:ok,
+            %Program{
+              body: [
+                %Binding{
+                  name: "double",
+                  value: %AnonymousFunction{params: ["x"], body: [%BinaryOp{op: "*"} = op]}
+                }
+              ]
+            }} = Yup.Parser.parse("double = { |x| x * 2 }", path: "block.yup")
+
+    assert %Identifier{name: "x"} = op.left
+    assert %Literal{kind: :integer, value: 2} = op.right
+  end
+
+  test "parses an anonymous function literal with source location" do
+    assert {:ok, %Program{body: [%AnonymousFunction{loc: loc}]}} =
+             Yup.Parser.parse("{ |x| x }", path: "block.yup")
+
+    assert loc == %{line: 1, column: 1}
+  end
+
+  test "parses an anonymous function with multiple block parameters" do
+    assert {:ok, %Program{body: [%AnonymousFunction{params: ["x", "y"]}]}} =
+             Yup.Parser.parse("{ |x, y| x + y }", path: "block.yup")
+  end
+
+  test "parses an anonymous function with no block parameters" do
+    assert {:ok, %Program{body: [%AnonymousFunction{params: []}]}} =
+             Yup.Parser.parse("{ || 42 }", path: "block.yup")
+  end
+
+  test "parses calling a name bound to a function value" do
+    source = """
+    double = { |x| x * 2 }
+    puts double(4)
+    """
+
+    assert {:ok,
+            %Program{
+              body: [
+                %Binding{name: "double", value: %AnonymousFunction{}},
+                %Call{name: "puts", args: [%Call{name: "double", args: [%Literal{value: 4}]}]}
+              ]
+            }} = Yup.Parser.parse(source, path: "block.yup")
+  end
+
+  test "reports a missing closing brace for an anonymous function" do
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("{ |x| x * 2", path: "bad.yup")
+
+    assert error.message == "expected }"
+  end
+
+  test "reports a missing pipe to start block parameters" do
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("{ x * 2 }", path: "bad.yup")
+    assert error.message == "expected | to start block parameters"
+  end
+
+  test "reports an invalid separator between block parameters" do
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("{ |x x| x }", path: "bad.yup")
+
+    assert error.message == "expected , or | in block parameters"
   end
 
   test "parses match with literal integer and binder patterns" do
