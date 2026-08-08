@@ -7,8 +7,17 @@ defmodule Yup.Parser do
   The architecture doc records this as a reversible bootstrap decision.
   """
 
-  alias Yup.AST.{BinaryOp, Binding, Call, Function, Identifier, Literal, Program}
+  alias Yup.AST.{BinaryOp, Binding, Call, Function, Identifier, Literal, Program, UnaryOp}
   alias Yup.SourceError
+
+  @binary_op_prec [
+    or: ["or"],
+    and: ["and"],
+    equality: ["==", "!="],
+    comparison: ["<", "<=", ">", ">="],
+    addition: ["+", "-"],
+    multiplication: ["*", "/"]
+  ]
 
   def parse(source, opts \\ []) do
     path = Keyword.get(opts, :path)
@@ -110,7 +119,7 @@ defmodule Yup.Parser do
 
   defp parse_expression(text, line, path) do
     tokens = tokenize(text, line, path)
-    {expr, rest} = parse_addition(tokens, path)
+    {expr, rest} = parse_or(tokens, path)
 
     case rest do
       [] ->
@@ -121,33 +130,54 @@ defmodule Yup.Parser do
     end
   end
 
-  defp parse_addition(tokens, path) do
-    {left, rest} = parse_multiplication(tokens, path)
-    parse_binary_tail(left, rest, path, ["+", "-"], &parse_multiplication/2)
+  defp parse_or(tokens, path),
+    do: parse_prec(tokens, path, @binary_op_prec[:or], &parse_and/2)
+
+  defp parse_and(tokens, path),
+    do: parse_prec(tokens, path, @binary_op_prec[:and], &parse_equality/2)
+
+  defp parse_equality(tokens, path),
+    do: parse_prec(tokens, path, @binary_op_prec[:equality], &parse_comparison/2)
+
+  defp parse_comparison(tokens, path),
+    do: parse_prec(tokens, path, @binary_op_prec[:comparison], &parse_addition/2)
+
+  defp parse_addition(tokens, path),
+    do: parse_prec(tokens, path, @binary_op_prec[:addition], &parse_multiplication/2)
+
+  defp parse_multiplication(tokens, path),
+    do: parse_prec(tokens, path, @binary_op_prec[:multiplication], &parse_unary/2)
+
+  defp parse_prec(tokens, path, ops, next) do
+    {left, rest} = next.(tokens, path)
+    parse_binary_tail(left, rest, path, ops, next)
   end
 
-  defp parse_multiplication(tokens, path) do
-    {left, rest} = parse_primary(tokens, path)
-    parse_binary_tail(left, rest, path, ["*", "/"], &parse_primary/2)
-  end
-
-  defp parse_binary_tail(
-         left,
-         [%{type: :op, value: op, line: line, column: column} | rest],
-         path,
-         ops,
-         next
-       ) do
-    if op in ops do
+  defp parse_binary_tail(left, [token | rest] = tokens, path, ops, next) do
+    if binary_op?(token, ops) do
       {right, remaining} = next.(rest, path)
-      node = %BinaryOp{op: op, left: left, right: right, loc: loc(line, column)}
+      node = %BinaryOp{op: token.value, left: left, right: right, loc: loc(token.line, token.column)}
       parse_binary_tail(node, remaining, path, ops, next)
     else
-      {left, [%{type: :op, value: op, line: line, column: column} | rest]}
+      {left, tokens}
     end
   end
 
-  defp parse_binary_tail(left, rest, _path, _ops, _next), do: {left, rest}
+  defp parse_binary_tail(left, [], _path, _ops, _next), do: {left, []}
+
+  defp binary_op?(%{type: :op, value: op}, ops), do: op in ops
+  defp binary_op?(%{type: :identifier, value: op}, ops) when op in ["and", "or"], do: op in ops
+  defp binary_op?(_token, _ops), do: false
+
+  defp parse_unary(
+         [%{type: :identifier, value: "not", line: line, column: column} | rest],
+         path
+       ) do
+    {operand, remaining} = parse_unary(rest, path)
+    {%UnaryOp{op: "not", operand: operand, loc: loc(line, column)}, remaining}
+  end
+
+  defp parse_unary(tokens, path), do: parse_primary(tokens, path)
 
   defp parse_primary([], path),
     do: raise(source_error(path, nil, nil, "unexpected end of expression"))
@@ -193,7 +223,7 @@ defmodule Yup.Parser do
          [%{type: :identifier, value: "puts", line: line, column: column} | rest],
          path
        ) do
-    {arg, remaining} = parse_addition(rest, path)
+    {arg, remaining} = parse_or(rest, path)
     {%Call{name: "puts", args: [arg], loc: loc(line, column)}, remaining}
   end
 
@@ -205,7 +235,7 @@ defmodule Yup.Parser do
   end
 
   defp parse_primary([%{type: :lparen} | rest], path) do
-    {expr, remaining} = parse_addition(rest, path)
+    {expr, remaining} = parse_or(rest, path)
 
     case remaining do
       [%{type: :rparen} | tail] -> {expr, tail}
@@ -221,7 +251,7 @@ defmodule Yup.Parser do
   defp parse_call_args([%{type: :rparen} | rest], _path, acc), do: {Enum.reverse(acc), rest}
 
   defp parse_call_args(tokens, path, acc) do
-    {expr, rest} = parse_addition(tokens, path)
+    {expr, rest} = parse_or(tokens, path)
 
     case rest do
       [%{type: :comma} | tail] ->
@@ -266,7 +296,14 @@ defmodule Yup.Parser do
     end
   end
 
-  for op <- ["+", "-", "*", "/"] do
+  for op <- ["==", "!=", "<=", ">="] do
+    defp tokenize(<<unquote(op), rest::binary>>, line, path, column, acc) do
+      token = %{type: :op, value: unquote(op), line: line, column: column}
+      tokenize(rest, line, path, column + byte_size(unquote(op)), [token | acc])
+    end
+  end
+
+  for op <- ["+", "-", "*", "/", "<", ">"] do
     defp tokenize(<<unquote(op), rest::binary>>, line, path, column, acc) do
       token = %{type: :op, value: unquote(op), line: line, column: column}
       tokenize(rest, line, path, column + 1, [token | acc])

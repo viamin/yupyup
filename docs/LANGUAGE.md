@@ -38,7 +38,8 @@ name = "world"
 puts name
 ```
 
-Rebinding the same name in a scope is a compile error.
+Rebinding the same name in a scope is a compile error and reports the source
+location of the offending line.
 
 Operators:
 
@@ -48,13 +49,35 @@ Operators:
 2 * 3
 8 / 2
 "Hello, " + name
+1 == 1
+1 != 2
+2 < 3
+3 <= 3
+4 > 3
+4 >= 4
+true and false
+true or false
+not ready
 ```
 
-`+` concatenates when either operand is a string. Integer division currently uses BEAM integer division.
+Operator precedence, from highest to lowest:
+
+1. Unary `not`
+2. `*`, `/`
+3. `+`, `-` (`+` also concatenates strings)
+4. `<`, `<=`, `>`, `>=`
+5. `==`, `!=`
+6. `and`
+7. `or`
+
+`and`, `or`, and `not` use Ruby-like truthiness: only `nil` and `false` are
+falsy. All other values are truthy. `==` and `!=` follow BEAM loose equality.
 
 ## Current Limitations
 
 The parser is line-oriented and intentionally tiny. It does not support nested blocks other than `def ... end`, string interpolation, arrays, maps, comments inside string literals, dot calls, pattern matching, actors, types, or verification constructs.
+
+Boolean operators are not short-circuiting in the BEAM backend yet. `true or (1 / 0)` evaluates both sides today.
 
 ## Proposed And Unresolved
 
@@ -116,5 +139,11 @@ model Light
 end
 ```
 
-None of these proposed forms are implemented yet.
+String interpolation may eventually join the slice if it can be added without
+distorting the bootstrap parser:
 
+```yup
+"Hello, #{name}"
+```
+
+None of these proposed forms are implemented yet.

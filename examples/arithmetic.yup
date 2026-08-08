@@ -1,0 +1,7 @@
+x = 10
+y = 3
+puts x + y
+puts x - y
+puts x * y
+puts x / y
+puts (x + y) * 2

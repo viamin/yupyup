@@ -1,0 +1,9 @@
+ready = true
+done = false
+
+puts ready and not done
+puts ready or done
+puts not ready
+puts not done
+puts ready and (1 == 1)
+puts false or (2 < 3)
