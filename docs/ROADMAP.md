@@ -7,11 +7,11 @@ GitHub issues are intended to be the source of truth for actionable work once th
 3. Define dot-call semantics and chaining for immutable values.
 4. Add immutable collections and functional collection operations.
 5. Add pattern matching and immutable product types.
-10. ~~Add abstract model and transition AST.~~ (done, #8)
+6. Parse type annotations, then implement a small gradual structural type checker.
 7. Experiment with refined types.
 8. Introduce actor/process semantics on the BEAM.
 9. Add actor request/reply semantics, crash semantics, links, monitors, and supervision.
-10. Add abstract model and transition AST.
+10. ~~Add abstract model and transition AST.~~ (done, #8)
 11. Build a tiny finite-state explorer for `yup verify`.
 12. Add invariants, nondeterminism, modeled environments, assumption reporting, `yup find`, monitors, and refinement research.
 

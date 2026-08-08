@@ -13,7 +13,11 @@ defmodule Yup.ParserTest do
     LiteralPattern,
     Match,
     MatchClause,
+    Model,
     Program,
+    StateAccess,
+    StateUpdate,
+    TernaryOp,
     UnaryOp
   }
 

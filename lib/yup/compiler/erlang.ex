@@ -73,6 +73,7 @@ defmodule Yup.Compiler.Erlang do
   defp expr(%Literal{kind: :integer, value: value} = node), do: {:integer, line(node), value}
   defp expr(%Literal{kind: :boolean, value: value} = node), do: {:atom, line(node), value}
   defp expr(%Literal{kind: nil} = node), do: {:atom, line(node), nil}
+  defp expr(%Literal{kind: :atom, value: value} = node), do: {:atom, line(node), value}
 
   defp expr(%Literal{kind: :string, value: value} = node) do
     line = line(node)
