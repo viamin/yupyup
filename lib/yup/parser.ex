@@ -283,66 +283,66 @@ defmodule Yup.Parser do
   end
 
   defp parse_pattern_tokens(
-         [%{type: :int, value: value, line: tl, column: tc} | rest],
-         path,
-         line,
-         _text
-       ) do
+           [%{type: :int, value: value, line: tl, column: tc} | rest],
+           path,
+           _text,
+           line
+         ) do
     ensure_no_trailing_tokens(rest, path, line)
     literal = %Literal{kind: :integer, value: String.to_integer(value), loc: loc(tl, tc)}
     %LiteralPattern{literal: literal, loc: loc(tl, tc)}
   end
 
   defp parse_pattern_tokens(
-         [%{type: :string, value: value, line: tl, column: tc} | rest],
-         path,
-         line,
-         _text
-       ) do
+           [%{type: :string, value: value, line: tl, column: tc} | rest],
+           path,
+           _text,
+           line
+         ) do
     ensure_no_trailing_tokens(rest, path, line)
     literal = %Literal{kind: :string, value: value, loc: loc(tl, tc)}
     %LiteralPattern{literal: literal, loc: loc(tl, tc)}
   end
 
   defp parse_pattern_tokens(
-         [%{type: :identifier, value: "true", line: tl, column: tc} | rest],
-         path,
-         line,
-         _text
-       ) do
+           [%{type: :identifier, value: "true", line: tl, column: tc} | rest],
+           path,
+           _text,
+           line
+         ) do
     ensure_no_trailing_tokens(rest, path, line)
     literal = %Literal{kind: :boolean, value: true, loc: loc(tl, tc)}
     %LiteralPattern{literal: literal, loc: loc(tl, tc)}
   end
 
   defp parse_pattern_tokens(
-         [%{type: :identifier, value: "false", line: tl, column: tc} | rest],
-         path,
-         line,
-         _text
-       ) do
+           [%{type: :identifier, value: "false", line: tl, column: tc} | rest],
+           path,
+           _text,
+           line
+         ) do
     ensure_no_trailing_tokens(rest, path, line)
     literal = %Literal{kind: :boolean, value: false, loc: loc(tl, tc)}
     %LiteralPattern{literal: literal, loc: loc(tl, tc)}
   end
 
   defp parse_pattern_tokens(
-         [%{type: :identifier, value: "nil", line: tl, column: tc} | rest],
-         path,
-         line,
-         _text
-       ) do
+           [%{type: :identifier, value: "nil", line: tl, column: tc} | rest],
+           path,
+           _text,
+           line
+         ) do
     ensure_no_trailing_tokens(rest, path, line)
     literal = %Literal{kind: nil, value: nil, loc: loc(tl, tc)}
     %LiteralPattern{literal: literal, loc: loc(tl, tc)}
   end
 
   defp parse_pattern_tokens(
-         [%{type: :identifier, value: name, line: tl, column: tc} | rest],
-         path,
-         line,
-         _text
-       ) do
+           [%{type: :identifier, value: name, line: tl, column: tc} | rest],
+           path,
+           _text,
+           line
+         ) do
     ensure_no_trailing_tokens(rest, path, line)
     %BinderPattern{name: name, loc: loc(tl, tc)}
   end
