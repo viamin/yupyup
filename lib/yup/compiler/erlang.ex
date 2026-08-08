@@ -202,11 +202,11 @@ defmodule Yup.Compiler.Erlang do
     }
   end
 
+  defp rename_in_node(node, _mapping), do: node
+
   defp rename_in_clause(%MatchClause{pattern: _pattern, body: body} = clause, mapping) do
     %{clause | body: rename_in_body(body, mapping)}
   end
-
-  defp rename_in_node(node, _mapping), do: node
 
   defp remote_call(line, module, function, args) do
     {:call, line, {:remote, line, {:atom, line, module}, {:atom, line, function}}, args}
