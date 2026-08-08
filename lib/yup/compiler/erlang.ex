@@ -125,7 +125,10 @@ defmodule Yup.Compiler.Erlang do
   end
 
   defp expr(%Constructor{tag: tag, args: args} = node, function_names) do
-    elements = [{:atom, line(node), String.to_atom(tag)} | Enum.map(args, &expr(&1, function_names))]
+    elements = [
+      {:atom, line(node), String.to_atom(tag)} | Enum.map(args, &expr(&1, function_names))
+    ]
+
     {:tuple, line(node), elements}
   end
 
@@ -154,7 +157,11 @@ defmodule Yup.Compiler.Erlang do
   defp runtime_for("or"), do: :or_op
   defp runtime_for(other), do: raise("unknown binary operator #{inspect(other)}")
 
-  defp lower_clause(%MatchClause{pattern: pattern, body: clause_body} = node, function_names, counter) do
+  defp lower_clause(
+         %MatchClause{pattern: pattern, body: clause_body} = node,
+         function_names,
+         counter
+       ) do
     {pattern_ast, mapping} = pattern_ast(pattern, %{}, counter)
     renamed_body = rename_in_body(clause_body, mapping)
     body_forms = body(renamed_body, function_names)
@@ -220,6 +227,11 @@ defmodule Yup.Compiler.Erlang do
 
   defp rename_in_node(%Binding{value: value} = node, mapping) do
     %{node | value: rename_in_node(value, mapping)}
+  end
+
+  defp rename_in_node(%AnonymousFunction{params: params, body: fn_body} = node, mapping) do
+    filtered = Enum.reduce(params, mapping, &Map.delete(&2, &1))
+    %{node | body: rename_in_body(fn_body, filtered)}
   end
 
   defp rename_in_node(%Match{subject: subject, clauses: clauses} = node, mapping) do
@@ -300,6 +312,11 @@ defmodule Yup.Compiler.Erlang do
           validate_scope!(body, updated, path)
         end)
 
+        seen
+
+      %AnonymousFunction{params: params, body: fn_body}, seen ->
+        updated = Enum.reduce(params, seen, &MapSet.put(&2, &1))
+        validate_scope!(fn_body, updated, path)
         seen
 
       _node, seen ->
