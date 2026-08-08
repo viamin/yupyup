@@ -18,6 +18,14 @@ defmodule Yup.CLITest do
     assert output =~ "Hello, world"
   end
 
+  test "runs match example through built escript", %{yup: yup} do
+    assert {output, 0} = System.cmd(yup, ["run", "examples/match.yup"], stderr_to_stdout: true)
+
+    assert output =~ "got ok: 42"
+    assert output =~ "got error: nope"
+    assert output =~ "the answer"
+  end
+
   @tag :tmp_dir
   test "reports source-oriented syntax errors through built escript", %{
     tmp_dir: tmp_dir,

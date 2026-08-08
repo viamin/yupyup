@@ -1,0 +1,28 @@
+result = Ok(42)
+
+match result
+when Ok(value)
+  puts "got ok: " + value
+when Error(reason)
+  puts "got error: " + reason
+end
+
+other = Error("nope")
+
+match other
+when Ok(value)
+  puts "got ok: " + value
+when Error(reason)
+  puts "got error: " + reason
+end
+
+answer = 42
+
+match answer
+when 0
+  puts "zero"
+when 42
+  puts "the answer"
+when n
+  puts "something else: " + n
+end
