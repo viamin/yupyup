@@ -1,0 +1,16 @@
+record Person
+  name
+  age
+end
+
+person = Person.new(name: "Ada", age: 42)
+puts person.name
+puts person.age
+
+def rename(person, new_name)
+  Person.new(name: new_name, age: person.age)
+end
+
+updated = rename(person, "Grace")
+puts updated.name
+puts updated.age

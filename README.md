@@ -29,6 +29,8 @@ This creates an executable named `yup` in the project root.
 ./yup run examples/hello.yup
 ./yup run examples/comparison.yup
 ./yup run examples/booleans.yup
+./yup run examples/match.yup
+./yup run examples/records.yup
 ```
 
 Expected output:
@@ -53,10 +55,22 @@ end
 puts hello("world")
 ```
 
+Records introduce immutable product types:
+
+```yup
+record Person
+  name
+  age
+end
+
+person = Person.new(name: "Ada", age: 42)
+puts person.name
+```
+
 ## Current Capability
 
-The bootstrap supports a small slice: function definitions, function calls, immutable local bindings, integers, strings, booleans, `nil`, arithmetic/string operators (`+`, `-`, `*`, `/`), comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`), boolean operators (`and`, `or`, `not`), and `puts`.
+The bootstrap supports a small slice: function definitions, function calls, immutable local bindings, integers, strings, booleans, `nil`, arithmetic/string operators (`+`, `-`, `*`, `/`), comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`), boolean operators (`and`, `or`, `not`), `puts`, pattern matching against literals and tagged values, and immutable record types with keyword construction and dot-call field access.
 
-It does not yet implement actors, types, formal verification, dot calls, blocks, collections, pattern matching, short-circuit boolean operators in the BEAM backend, or string interpolation.
+It does not yet implement actors, types, formal verification, blocks, collections, general method-call dot syntax, mutable record updates, record destructure patterns in `match`, short-circuit boolean operators in the BEAM backend, or string interpolation.
 
 Read [docs/VISION.md](docs/VISION.md) for the larger experiment.

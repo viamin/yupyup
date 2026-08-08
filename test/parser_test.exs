@@ -4,9 +4,11 @@ defmodule Yup.ParserTest do
   alias Yup.AST.{
     BinaryOp,
     BinderPattern,
+    Binding,
     Call,
     Constructor,
     ConstructorPattern,
+    FieldAccess,
     Function,
     Identifier,
     Literal,
@@ -14,6 +16,8 @@ defmodule Yup.ParserTest do
     Match,
     MatchClause,
     Program,
+    Record,
+    RecordConstruction,
     UnaryOp
   }
 
@@ -313,5 +317,132 @@ defmodule Yup.ParserTest do
              Yup.Parser.parse("match x\nwhen \n  puts x\nend\n", path: "bad.yup")
 
     assert error.message =~ "missing pattern after when"
+  end
+
+  test "parses record declaration into AST" do
+    source = """
+    record Person
+      name
+      age
+    end
+    """
+
+    assert {:ok, %Program{records: [%Record{name: "Person", fields: ["name", "age"]}]}} =
+             Yup.Parser.parse(source, path: "record.yup")
+  end
+
+  test "parses record construction with keyword fields" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    person = Person.new(name: "Ada", age: 42)
+    """
+
+    assert {:ok,
+            %Program{
+              records: [%Record{name: "Person", fields: ["name", "age"]}],
+              body: [
+                %Binding{
+                  name: "person",
+                  value: %RecordConstruction{
+                    name: "Person",
+                    fields: [
+                      {"name", %Literal{kind: :string, value: "Ada"}, _},
+                      {"age", %Literal{kind: :integer, value: 42}, _}
+                    ]
+                  }
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "record.yup")
+  end
+
+  test "parses field access with dot syntax" do
+    source = """
+    record Person
+      name
+    end
+
+    person = Person.new(name: "Ada")
+    puts person.name
+    """
+
+    assert {:ok,
+            %Program{
+              body: [
+                %Binding{},
+                %Call{
+                  args: [
+                    %FieldAccess{
+                      record: %Identifier{name: "person"},
+                      field: "name"
+                    }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "record.yup")
+  end
+
+  test "parses chained field access" do
+    assert {:ok,
+            %Program{
+              body: [
+                %FieldAccess{
+                  record: %FieldAccess{
+                    record: %Identifier{name: "person"},
+                    field: "address"
+                  },
+                  field: "city"
+                }
+              ]
+            }} = Yup.Parser.parse("person.address.city", path: "expr.yup")
+  end
+
+  test "field access binds tighter than addition" do
+    assert {:ok,
+            %Program{
+              body: [
+                %BinaryOp{
+                  op: "+",
+                  right: %FieldAccess{field: "age", record: %Identifier{name: "person"}}
+                }
+              ]
+            }} = Yup.Parser.parse("1 + person.age", path: "expr.yup")
+  end
+
+  test "reports stray colon as an error" do
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse("puts :weird", path: "bad.yup")
+
+    assert error.message =~ "unexpected character"
+  end
+
+  test "reports missing end for record" do
+    source = """
+    record Person
+      name
+    """
+
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse(source, path: "record.yup")
+
+    assert error.message =~ "missing end for record Person"
+  end
+
+  test "rejects record declarations inside function bodies" do
+    source = """
+    def foo()
+      record Person
+        name
+      end
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse(source, path: "nested.yup")
+
+    assert error.message =~ "record declarations are only allowed at the top level"
   end
 end

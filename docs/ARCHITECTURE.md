@@ -47,6 +47,8 @@ Generated modules are named deterministically from the source path when availabl
 
 Bindings are immutable. Rebinding a name in the same scope is rejected before lowering. Erlang variables also reinforce this design choice.
 
+Records are first-class immutable product types. Their declarations live on `Yup.AST.Program.records` and are validated by `Yup.Compiler.Erlang` before lowering. Construction lowers to a BEAM map literal and field access lowers to `maps:get/2`, which keeps the runtime simple until a richer structural type system can take over.
+
 ## Open Tradeoffs
 
 The current parser is intentionally simple. It should be replaced or evolved when YupYup needs indentation/newline-sensitive Ruby-like syntax, better recovery, multiline expressions, blocks, and richer diagnostics.
