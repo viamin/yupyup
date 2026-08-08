@@ -8,6 +8,7 @@ defmodule Yup.Parser do
   """
 
   alias Yup.AST.{
+    AnonymousFunction,
     BinaryOp,
     BinderPattern,
     Binding,
@@ -254,8 +255,12 @@ defmodule Yup.Parser do
         close_transition(after_transition, name, line, path, body)
 
       _ ->
-        raise source_error(path, line, 1,
-          "expected transition declaration like transition toggle do")
+        raise source_error(
+                path,
+                line,
+                1,
+                "expected transition declaration like transition toggle do"
+              )
     end
   end
 
@@ -289,8 +294,7 @@ defmodule Yup.Parser do
         parse_transition_body(rest, path, [statement | acc])
 
       true ->
-        raise source_error(path, line, 1,
-          "expected state update or end inside transition body")
+        raise source_error(path, line, 1, "expected state update or end inside transition body")
     end
   end
 
@@ -344,8 +348,12 @@ defmodule Yup.Parser do
             {node, remaining}
 
           _ ->
-            raise source_error(path, line_from(condition), column_from(condition),
-              "expected : in ternary expression")
+            raise source_error(
+                    path,
+                    line_from(condition),
+                    column_from(condition),
+                    "expected : in ternary expression"
+                  )
         end
 
       _ ->
@@ -819,8 +827,61 @@ defmodule Yup.Parser do
     end
   end
 
+  defp parse_primary([%{type: :lbrace, line: line, column: column} | rest], path) do
+    {params, after_params} = parse_block_params(rest, path)
+    {body_expr, after_body} = parse_or(after_params, path)
+
+    case after_body do
+      [%{type: :rbrace} | tail] ->
+        {%AnonymousFunction{params: params, body: [body_expr], loc: loc(line, column)}, tail}
+
+      [%{line: line, column: column} | _] ->
+        raise source_error(path, line, column, "expected }")
+
+      [] ->
+        raise source_error(path, nil, nil, "expected }")
+    end
+  end
+
   defp parse_primary([%{value: value, line: line, column: column} | _], path) do
     raise source_error(path, line, column, "unexpected token #{value}")
+  end
+
+  defp parse_block_params([%{type: :pipe} | rest], path),
+    do: parse_block_param_names(rest, path, [])
+
+  defp parse_block_params([%{line: line, column: column} | _], path) do
+    raise source_error(path, line, column, "expected | to start block parameters")
+  end
+
+  defp parse_block_params([], path) do
+    raise source_error(path, nil, nil, "expected | to start block parameters")
+  end
+
+  defp parse_block_param_names([%{type: :pipe} | rest], _path, acc), do: {Enum.reverse(acc), rest}
+
+  defp parse_block_param_names([%{type: :identifier, value: name} | rest], path, acc) do
+    case rest do
+      [%{type: :comma} | tail] ->
+        parse_block_param_names(tail, path, [name | acc])
+
+      [%{type: :pipe} | tail] ->
+        {Enum.reverse([name | acc]), tail}
+
+      [%{line: line, column: column} | _] ->
+        raise source_error(path, line, column, "expected , or | in block parameters")
+
+      [] ->
+        raise source_error(path, nil, nil, "expected | to close block parameters")
+    end
+  end
+
+  defp parse_block_param_names([%{line: line, column: column} | _], path, _acc) do
+    raise source_error(path, line, column, "expected block parameter name")
+  end
+
+  defp parse_block_param_names([], path, _acc) do
+    raise source_error(path, nil, nil, "expected | to close block parameters")
   end
 
   defp parse_call_args([%{type: :rparen} | rest], _path, acc), do: {Enum.reverse(acc), rest}
@@ -864,7 +925,15 @@ defmodule Yup.Parser do
     end
   end
 
-  for {char, type} <- [{"(", :lparen}, {")", :rparen}, {",", :comma}, {".", :dot}] do
+  for {char, type} <- [
+        {"(", :lparen},
+        {")", :rparen},
+        {",", :comma},
+        {".", :dot},
+        {"{", :lbrace},
+        {"}", :rbrace},
+        {"|", :pipe}
+      ] do
     defp tokenize(<<unquote(char), rest::binary>>, line, path, column, acc) do
       token = %{type: unquote(type), value: unquote(char), line: line, column: column}
       tokenize(rest, line, path, column + 1, [token | acc])
@@ -879,7 +948,9 @@ defmodule Yup.Parser do
   defp tokenize(<<":", rest::binary>>, line, path, column, acc) do
     case rest do
       <<char, _::binary>> when char in ?a..?z or char in ?A..?Z or char == ?_ or char == ?? ->
-        {value, remaining} = take_while(rest, &(&1 in ?a..?z or &1 in ?A..?Z or &1 in ?0..?9 or &1 in [?_, ??, ?!]))
+        {value, remaining} =
+          take_while(rest, &(&1 in ?a..?z or &1 in ?A..?Z or &1 in ?0..?9 or &1 in [?_, ??, ?!]))
+
         token = %{type: :atom, value: value, line: line, column: column}
         tokenize(remaining, line, path, column + byte_size(value) + 1, [token | acc])
 
