@@ -29,7 +29,7 @@ YupYup AST
 
 `Yup.Parser` is a small hand-written parser. It preserves line and column locations on AST nodes. The parser is line-oriented for the first slice, but this is not a long-term grammar commitment.
 
-`Yup.AST.*` modules define explicit structs for programs, functions, calls, bindings, identifiers, literals, and binary operations.
+`Yup.AST.*` modules define explicit structs for programs, functions, calls, bindings, identifiers, literals, binary operations, and unary operations.
 
 `Yup.Compiler` owns compilation and execution orchestration.
 

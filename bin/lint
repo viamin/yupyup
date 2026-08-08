@@ -1,0 +1,42 @@
+#!/bin/sh
+# Elixir project lint script. The bootstrap is an Elixir/Erlang BEAM compiler
+# with no Ruby toolchain, so we use mix format --check-formatted as the
+# pre-commit lint entry point.
+#
+# When mix is not available (e.g., a minimal local environment), the script
+# prints a warning and exits successfully so the hook can advance. CI installs
+# the Elixir toolchain and runs the real check.
+#
+# Usage:
+#   bin/lint            # check the whole tree
+#   bin/lint --staged   # check only the Elixir files staged for commit
+
+set -e
+
+if [ "$1" = "--staged" ]; then
+  shift
+  if ! command -v mix >/dev/null 2>&1; then
+    echo "Warning: mix tool not available, skipping lint check"
+    exit 0
+  fi
+
+  if ! command -v git >/dev/null 2>&1; then
+    echo "Warning: git tool not available, skipping staged lint check"
+    exit 0
+  fi
+
+  staged=$(git diff --cached --name-only --diff-filter=ACMR -- '*.ex' '*.exs' 2>/dev/null || true)
+
+  if [ -z "$staged" ]; then
+    exit 0
+  fi
+
+  exec mix format --check-formatted $staged
+fi
+
+if ! command -v mix >/dev/null 2>&1; then
+  echo "Warning: mix tool not available, skipping lint check"
+  exit 0
+fi
+
+mix format --check-formatted

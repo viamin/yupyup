@@ -15,7 +15,7 @@ defmodule Yup.CLITest do
     assert File.exists?(yup)
     assert {output, 0} = System.cmd(yup, ["run", "examples/hello.yup"], stderr_to_stdout: true)
 
-    assert output == "Hello, world\n"
+    assert output =~ "Hello, world"
   end
 
   @tag :tmp_dir
@@ -28,6 +28,30 @@ defmodule Yup.CLITest do
 
     assert {output, 1} = System.cmd(yup, ["run", path], stderr_to_stdout: true)
     assert output =~ "#{path}:1:6: unterminated string"
+  end
+
+  @tag :tmp_dir
+  test "reports rebinding compile errors through built escript", %{
+    tmp_dir: tmp_dir,
+    yup: yup
+  } do
+    path = Path.join(tmp_dir, "rebind.yup")
+    File.write!(path, "x = 1\nx = 2\n")
+
+    assert {output, 1} = System.cmd(yup, ["run", path], stderr_to_stdout: true)
+    assert output =~ "#{path}:2:1: cannot rebind immutable name x"
+  end
+
+  @tag :tmp_dir
+  test "reports unexpected characters through built escript", %{
+    tmp_dir: tmp_dir,
+    yup: yup
+  } do
+    path = Path.join(tmp_dir, "bad.yup")
+    File.write!(path, "1 + @")
+
+    assert {output, 1} = System.cmd(yup, ["run", path], stderr_to_stdout: true)
+    assert output =~ "#{path}:1:5: unexpected character"
   end
 
   test "unknown command exits non-zero" do

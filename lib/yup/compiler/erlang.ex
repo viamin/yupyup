@@ -3,7 +3,7 @@ defmodule Yup.Compiler.Erlang do
   Lowers YupYup AST into Erlang abstract forms.
   """
 
-  alias Yup.AST.{BinaryOp, Binding, Call, Function, Identifier, Literal, Program}
+  alias Yup.AST.{BinaryOp, Binding, Call, Function, Identifier, Literal, Program, UnaryOp}
   alias Yup.SourceError
 
   def module_name(%Program{} = program) do
@@ -70,16 +70,26 @@ defmodule Yup.Compiler.Erlang do
   end
 
   defp expr(%BinaryOp{op: op, left: left, right: right} = node) do
-    runtime =
-      case op do
-        "+" -> :add
-        "-" -> :subtract
-        "*" -> :multiply
-        "/" -> :divide
-      end
-
-    remote_call(line(node), :"Elixir.Yup.Runtime", runtime, [expr(left), expr(right)])
+    remote_call(line(node), :"Elixir.Yup.Runtime", runtime_for(op), [expr(left), expr(right)])
   end
+
+  defp expr(%UnaryOp{op: "not", operand: operand} = node) do
+    remote_call(line(node), :"Elixir.Yup.Runtime", :not_op, [expr(operand)])
+  end
+
+  defp runtime_for("+"), do: :add
+  defp runtime_for("-"), do: :subtract
+  defp runtime_for("*"), do: :multiply
+  defp runtime_for("/"), do: :divide
+  defp runtime_for("=="), do: :equal?
+  defp runtime_for("!="), do: :not_equal?
+  defp runtime_for("<"), do: :less?
+  defp runtime_for("<="), do: :less_or_equal?
+  defp runtime_for(">"), do: :greater?
+  defp runtime_for(">="), do: :greater_or_equal?
+  defp runtime_for("and"), do: :and_op
+  defp runtime_for("or"), do: :or_op
+  defp runtime_for(other), do: raise("unknown binary operator #{inspect(other)}")
 
   defp remote_call(line, module, function, args) do
     {:call, line, {:remote, line, {:atom, line, module}, {:atom, line, function}}, args}
