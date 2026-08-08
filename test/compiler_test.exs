@@ -502,4 +502,44 @@ defmodule Yup.CompilerTest do
       assert result == 7
     end)
   end
+
+  test "compiles program with models alongside executable code" do
+    source = """
+    model Light
+      state value = :off
+
+      transition toggle do
+        state.value = :on
+      end
+    end
+
+    puts "model ignored, code still runs"
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "model.yup")
+
+    capture_io(fn ->
+      assert {:ok, module} = Yup.Compiler.compile(program)
+      assert {:ok, :ok} = Yup.Compiler.run(module)
+    end)
+  end
+
+  test "compiles program containing only a model" do
+    source = """
+    model Light
+      state value = :off
+
+      transition toggle do
+        state.value = :on
+      end
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "model.yup")
+
+    capture_io(fn ->
+      assert {:ok, module} = Yup.Compiler.compile(program)
+      assert {:ok, :ok} = Yup.Compiler.run(module)
+    end)
+  end
 end

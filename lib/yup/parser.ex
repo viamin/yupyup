@@ -21,7 +21,13 @@ defmodule Yup.Parser do
     LiteralPattern,
     Match,
     MatchClause,
+    Model,
+    ModelState,
     Program,
+    StateAccess,
+    StateUpdate,
+    TernaryOp,
+    Transition,
     UnaryOp
   }
 
@@ -54,8 +60,17 @@ defmodule Yup.Parser do
     case next_significant(rest) do
       nil ->
         functions = Enum.filter(forms, &match?(%Function{}, &1))
-        body = Enum.reject(forms, &match?(%Function{}, &1))
-        {:ok, %Program{source_path: path, functions: functions, body: body, loc: loc(1, 1)}}
+        models = Enum.filter(forms, &match?(%Model{}, &1))
+        body = Enum.reject(forms, &(match?(%Function{}, &1) or match?(%Model{}, &1)))
+
+        {:ok,
+         %Program{
+           source_path: path,
+           functions: functions,
+           body: body,
+           models: models,
+           loc: loc(1, 1)
+         }}
 
       {line, _text} ->
         raise source_error(path, line, 1, "unexpected input")
@@ -85,6 +100,10 @@ defmodule Yup.Parser do
       String.starts_with?(trimmed, "match ") or trimmed == "match" ->
         {match, after_match} = parse_match(line, text, rest, path)
         parse_forms(after_match, path, [match | acc])
+
+      String.starts_with?(trimmed, "model ") ->
+        {model, after_model} = parse_model(line, text, rest, path)
+        parse_forms(after_model, path, [model | acc])
 
       true ->
         statement = parse_statement(text, line, path)
@@ -158,6 +177,195 @@ defmodule Yup.Parser do
   defp close_match([], _subject, line, path, _clauses) do
     raise source_error(path, line, 1, "missing end for match")
   end
+
+  # ── model declarations ──────────────────────────────────────────────
+
+  defp parse_model(line, text, rest, path) do
+    trimmed = String.trim(text)
+
+    case Regex.run(~r/^model\s+([A-Z][a-zA-Z0-9_]*)\s*$/, trimmed) do
+      [_, name] ->
+        {body, after_model} = parse_model_body(rest, path, [])
+        close_model(after_model, name, line, path, body)
+
+      _ ->
+        raise source_error(path, line, 1, "expected model declaration like model Light")
+    end
+  end
+
+  defp close_model([{_end_line, end_text} | remaining], name, line, _path, body) do
+    if String.trim(end_text) == "end" do
+      states = Enum.filter(body, &match?(%ModelState{}, &1))
+      transitions = Enum.filter(body, &match?(%Transition{}, &1))
+      {%Model{name: name, states: states, transitions: transitions, loc: loc(line, 1)}, remaining}
+    else
+      raise "internal parser error: model close called without end"
+    end
+  end
+
+  defp close_model([], name, line, path, _body) do
+    raise source_error(path, line, 1, "missing end for model #{name}")
+  end
+
+  defp parse_model_body([], _path, acc), do: {Enum.reverse(acc), []}
+
+  defp parse_model_body([{line, raw} | rest] = lines, path, acc) do
+    text = strip_comment(raw)
+    trimmed = String.trim(text)
+
+    cond do
+      blank?(text) ->
+        parse_model_body(rest, path, acc)
+
+      trimmed == "end" ->
+        {Enum.reverse(acc), lines}
+
+      String.starts_with?(trimmed, "state ") ->
+        {state, after_state} = parse_model_state(line, text, rest, path)
+        parse_model_body(after_state, path, [state | acc])
+
+      String.starts_with?(trimmed, "transition ") ->
+        {transition, after_transition} = parse_transition(line, text, rest, path)
+        parse_model_body(after_transition, path, [transition | acc])
+
+      true ->
+        raise source_error(path, line, 1, "expected state or transition inside model")
+    end
+  end
+
+  defp parse_model_state(line, text, rest, path) do
+    trimmed = String.trim(text)
+
+    case Regex.run(~r/^state\s+([a-z_][a-zA-Z0-9_?!]*)\s*=\s*(.+)$/, trimmed) do
+      [_, name, expr_text] ->
+        value = parse_model_expression(expr_text, line, path)
+        {%ModelState{name: name, value: value, loc: loc(line, 1)}, rest}
+
+      _ ->
+        raise source_error(path, line, 1, "expected state declaration like state value = :off")
+    end
+  end
+
+  defp parse_transition(line, text, rest, path) do
+    trimmed = String.trim(text)
+
+    case Regex.run(~r/^transition\s+([a-z_][a-zA-Z0-9_?!]*)\s+do\s*$/, trimmed) do
+      [_, name] ->
+        {body, after_transition} = parse_transition_body(rest, path, [])
+        close_transition(after_transition, name, line, path, body)
+
+      _ ->
+        raise source_error(
+                path,
+                line,
+                1,
+                "expected transition declaration like transition toggle do"
+              )
+    end
+  end
+
+  defp close_transition([{_end_line, end_text} | remaining], name, line, _path, body) do
+    if String.trim(end_text) == "end" do
+      {%Transition{name: name, body: body, loc: loc(line, 1)}, remaining}
+    else
+      raise "internal parser error: transition close called without end"
+    end
+  end
+
+  defp close_transition([], name, line, path, _body) do
+    raise source_error(path, line, 1, "missing end for transition #{name}")
+  end
+
+  defp parse_transition_body([], _path, acc), do: {Enum.reverse(acc), []}
+
+  defp parse_transition_body([{line, raw} | rest] = lines, path, acc) do
+    text = strip_comment(raw)
+    trimmed = String.trim(text)
+
+    cond do
+      blank?(text) ->
+        parse_transition_body(rest, path, acc)
+
+      trimmed == "end" ->
+        {Enum.reverse(acc), lines}
+
+      String.starts_with?(trimmed, "state.") ->
+        statement = parse_transition_statement(text, line, path)
+        parse_transition_body(rest, path, [statement | acc])
+
+      true ->
+        raise source_error(path, line, 1, "expected state update or end inside transition body")
+    end
+  end
+
+  defp parse_transition_statement(text, line, path) do
+    trimmed = String.trim(text)
+
+    case Regex.run(~r/^state\.([a-z_][a-zA-Z0-9_?!]*)\s*=\s*(.+)$/, trimmed) do
+      [_, name, expr_text] ->
+        value = parse_model_expression(expr_text, line, path)
+        %StateUpdate{name: name, value: value, loc: loc(line, 1)}
+
+      _ ->
+        expr = parse_model_expression(trimmed, line, path)
+        expr
+    end
+  end
+
+  # ── model expressions (atoms, ternary, access) ─────────────────────
+
+  defp parse_model_expression(text, line, path) do
+    tokens = tokenize(text, line, path)
+    {expr, rest} = parse_ternary(tokens, path)
+
+    case rest do
+      [] ->
+        expr
+
+      [%{value: value, column: column} | _] ->
+        raise source_error(path, line, column, "unexpected token #{value}")
+    end
+  end
+
+  defp parse_ternary(tokens, path) do
+    {condition, rest} = parse_or(tokens, path)
+
+    case rest do
+      [%{type: :question} | then_tokens] ->
+        {then_expr, after_then} = parse_ternary(then_tokens, path)
+
+        case after_then do
+          [%{type: :colon} | else_tokens] ->
+            {else_expr, remaining} = parse_ternary(else_tokens, path)
+
+            node = %TernaryOp{
+              condition: condition,
+              then_expr: then_expr,
+              else_expr: else_expr,
+              loc: loc(line_from(condition), column_from(condition))
+            }
+
+            {node, remaining}
+
+          _ ->
+            raise source_error(
+                    path,
+                    line_from(condition),
+                    column_from(condition),
+                    "expected : in ternary expression"
+                  )
+        end
+
+      _ ->
+        {condition, rest}
+    end
+  end
+
+  defp line_from(%{loc: %{line: line}}), do: line
+  defp line_from(_), do: 1
+
+  defp column_from(%{loc: %{column: column}}), do: column
+  defp column_from(_), do: 1
 
   defp parse_match_clauses([], _path, acc), do: {Enum.reverse(acc), []}
 
@@ -541,6 +749,10 @@ defmodule Yup.Parser do
     {%Literal{kind: :string, value: value, loc: loc(line, column)}, rest}
   end
 
+  defp parse_primary([%{type: :atom, value: value, line: line, column: column} | rest], _path) do
+    {%Literal{kind: :atom, value: String.to_atom(value), loc: loc(line, column)}, rest}
+  end
+
   defp parse_primary(
          [%{type: :identifier, value: "true", line: line, column: column} | rest],
          _path
@@ -584,6 +796,18 @@ defmodule Yup.Parser do
        ) do
     {args, remaining} = parse_call_args(rest, path, [])
     {%Call{name: name, args: args, loc: loc(line, column)}, remaining}
+  end
+
+  defp parse_primary(
+         [
+           %{type: :identifier, value: "state", line: line, column: column},
+           %{type: :dot},
+           %{type: :identifier, value: name}
+           | rest
+         ],
+         _path
+       ) do
+    {%StateAccess{name: name, loc: loc(line, column)}, rest}
   end
 
   defp parse_primary(
@@ -705,6 +929,7 @@ defmodule Yup.Parser do
         {"(", :lparen},
         {")", :rparen},
         {",", :comma},
+        {".", :dot},
         {"{", :lbrace},
         {"}", :rbrace},
         {"|", :pipe}
@@ -712,6 +937,26 @@ defmodule Yup.Parser do
     defp tokenize(<<unquote(char), rest::binary>>, line, path, column, acc) do
       token = %{type: unquote(type), value: unquote(char), line: line, column: column}
       tokenize(rest, line, path, column + 1, [token | acc])
+    end
+  end
+
+  defp tokenize(<<"?", rest::binary>>, line, path, column, acc) do
+    token = %{type: :question, value: "?", line: line, column: column}
+    tokenize(rest, line, path, column + 1, [token | acc])
+  end
+
+  defp tokenize(<<":", rest::binary>>, line, path, column, acc) do
+    case rest do
+      <<char, _::binary>> when char in ?a..?z or char in ?A..?Z or char == ?_ or char == ?? ->
+        {value, remaining} =
+          take_while(rest, &(&1 in ?a..?z or &1 in ?A..?Z or &1 in ?0..?9 or &1 in [?_, ??, ?!]))
+
+        token = %{type: :atom, value: value, line: line, column: column}
+        tokenize(remaining, line, path, column + byte_size(value) + 1, [token | acc])
+
+      _ ->
+        token = %{type: :colon, value: ":", line: line, column: column}
+        tokenize(rest, line, path, column + 1, [token | acc])
     end
   end
 

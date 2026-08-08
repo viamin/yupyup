@@ -74,6 +74,9 @@ defmodule Yup.Compiler.Erlang do
   defp expr(%Literal{kind: :integer, value: value} = node, _function_names),
     do: {:integer, line(node), value}
 
+  defp expr(%Literal{kind: :atom, value: value} = node, _function_names),
+    do: {:atom, line(node), value}
+
   defp expr(%Literal{kind: :boolean, value: value} = node, _function_names),
     do: {:atom, line(node), value}
 

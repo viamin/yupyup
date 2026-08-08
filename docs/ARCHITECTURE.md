@@ -29,7 +29,7 @@ YupYup AST
 
 `Yup.Parser` is a small hand-written parser. It preserves line and column locations on AST nodes. The parser is line-oriented for the first slice, but this is not a long-term grammar commitment.
 
-`Yup.AST.*` modules define explicit structs for programs, functions, anonymous functions, calls, bindings, identifiers, literals, binary operations, unary operations, constructor expressions, `match` expressions, match clauses, and literal/binder/constructor patterns.
+`Yup.AST.*` modules define explicit structs for programs, functions, anonymous functions, calls, bindings, identifiers, literals, binary operations, unary operations, constructor expressions, `match` expressions, match clauses, literal/binder/constructor patterns, pattern matching, models, model state, transitions, ternary operations, and state access/update expressions.
 
 `Yup.Compiler` owns compilation and execution orchestration.
 
@@ -50,6 +50,8 @@ The bootstrap uses Erlang abstract forms and `:compile.forms/2` rather than gene
 Generated modules are named deterministically from the source path when available, or from the program term for in-memory compilation. Before loading a generated module, the compiler purges and deletes any older module with the same name.
 
 Bindings are immutable. Rebinding a name in the same scope is rejected before lowering. Erlang variables also reinforce this design choice.
+
+Model constructs (`model`, `state`, `transition`) are parsed into explicit AST nodes but are not lowered to BEAM. They are preserved in `Program.models` for future analysis passes (model checking, constraint finding) that consume the AST independently of the execution compiler.
 
 ## Open Tradeoffs
 
