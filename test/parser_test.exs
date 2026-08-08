@@ -314,4 +314,214 @@ defmodule Yup.ParserTest do
 
     assert error.message =~ "missing pattern after when"
   end
+
+  # ── model declarations ─────────────────────────────────────────────
+
+  test "parses model with state and transition into AST" do
+    source = """
+    model Light
+      state value = :off
+
+      transition toggle do
+        state.value = value == :off ? :on : :off
+      end
+    end
+    """
+
+    assert {:ok, %Program{models: [model]}} = Yup.Parser.parse(source, path: "model.yup")
+    assert model.name == "Light"
+    assert model.loc == %{line: 1, column: 1}
+    assert [state] = model.states
+    assert state.name == "value"
+    assert %Literal{kind: :atom, value: :off} = state.value
+    assert state.loc == %{line: 2, column: 1}
+    assert [transition] = model.transitions
+    assert transition.name == "toggle"
+    assert transition.loc == %{line: 4, column: 1}
+    assert [update] = transition.body
+    assert %StateUpdate{name: "value"} = update
+  end
+
+  test "parses atom literals" do
+    source = """
+    model Light
+      state value = :on
+    end
+    """
+
+    assert {:ok, %Program{models: [%Model{states: [state]}]}} =
+             Yup.Parser.parse(source, path: "model.yup")
+
+    assert %Literal{kind: :atom, value: :on} = state.value
+  end
+
+  test "parses ternary expressions in model context" do
+    source = """
+    model Light
+      state value = :off
+
+      transition toggle do
+        state.value = value == :off ? :on : :off
+      end
+    end
+    """
+
+    assert {:ok, %Program{models: [%Model{transitions: [transition]}]}} =
+             Yup.Parser.parse(source, path: "model.yup")
+
+    assert [%StateUpdate{value: %TernaryOp{} = ternary}] = transition.body
+    assert %BinaryOp{op: "=="} = ternary.condition
+    assert %Literal{kind: :atom, value: :on} = ternary.then_expr
+    assert %Literal{kind: :atom, value: :off} = ternary.else_expr
+  end
+
+  test "parses state access in model expressions" do
+    source = """
+    model Switch
+      state on = :false
+
+      transition flip do
+        state.on = state.on == :true ? :false : :true
+      end
+    end
+    """
+
+    assert {:ok, %Program{models: [%Model{transitions: [transition]}]}} =
+             Yup.Parser.parse(source, path: "model.yup")
+
+    assert [%StateUpdate{value: %TernaryOp{condition: %BinaryOp{left: %StateAccess{}}}}] =
+             transition.body
+  end
+
+  test "model and executable code coexist in one source file" do
+    source = """
+    model Light
+      state value = :off
+
+      transition toggle do
+        state.value = :on
+      end
+    end
+
+    puts "model parsed alongside code"
+    """
+
+    assert {:ok,
+            %Program{
+              models: [%Model{name: "Light"}],
+              body: [%Call{name: "puts"}],
+              functions: []
+            }} = Yup.Parser.parse(source, path: "coexist.yup")
+  end
+
+  test "model with multiple states and transitions" do
+    source = """
+    model TrafficLight
+      state color = :red
+      state timer = 0
+
+      transition advance do
+        state.color = color == :red ? :green : color == :green ? :yellow : :red
+      end
+
+      transition tick do
+        state.timer = timer + 1
+      end
+    end
+    """
+
+    assert {:ok, %Program{models: [model]}} = Yup.Parser.parse(source, path: "model.yup")
+    assert length(model.states) == 2
+    assert length(model.transitions) == 2
+    assert Enum.at(model.states, 0).name == "color"
+    assert Enum.at(model.states, 1).name == "timer"
+  end
+
+  test "reports missing end for model" do
+    source = """
+    model Light
+      state value = :off
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+    assert error.message =~ "missing end for model Light"
+  end
+
+  test "reports missing end for transition" do
+    source = """
+    model Light
+      state value = :off
+      transition toggle do
+        state.value = :on
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+    assert error.message =~ "missing end for transition toggle"
+  end
+
+  test "reports bad model name" do
+    source = """
+    model 123Bad
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+    assert error.message =~ "expected model declaration"
+  end
+
+  test "reports unexpected content inside model" do
+    source = """
+    model Light
+      puts "nope"
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+    assert error.message =~ "expected state or transition inside model"
+  end
+
+  test "reports unexpected content inside transition body" do
+    source = """
+    model Light
+      state value = :off
+      transition toggle do
+        puts "nope"
+      end
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+    assert error.message =~ "expected state update or end inside transition body"
+  end
+
+  test "preserves source locations on model AST nodes" do
+    source = """
+    model Light
+      state value = :off
+
+      transition toggle do
+        state.value = :on
+      end
+    end
+    """
+
+    assert {:ok, %Program{models: [model]}} = Yup.Parser.parse(source, path: "model.yup")
+    assert %{line: 1, column: 1} = model.loc
+    assert %{line: 2, column: 1} = hd(model.states).loc
+    assert %{line: 4, column: 1} = hd(model.transitions).loc
+  end
+
+  test "parses model with atom containing special chars" do
+    source = """
+    model Flags
+      state status = :ok?!
+    end
+    """
+
+    assert {:ok, %Program{models: [%Model{states: [state]}]}} =
+             Yup.Parser.parse(source, path: "model.yup")
+
+    assert %Literal{kind: :atom, value: :"ok?!"} = state.value
+  end
 end

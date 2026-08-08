@@ -16,7 +16,13 @@ defmodule Yup.Compiler.Erlang do
     LiteralPattern,
     Match,
     MatchClause,
+    Model,
+    ModelState,
     Program,
+    StateAccess,
+    StateUpdate,
+    TernaryOp,
+    Transition,
     UnaryOp
   }
 
