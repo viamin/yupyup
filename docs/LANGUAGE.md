@@ -29,7 +29,13 @@ Literals:
 true
 false
 nil
+:off
+:on
+:ok?
 ```
+
+Atoms are written with a leading colon and an identifier name. They are
+symbolic constants primarily used in model state expressions.
 
 Immutable local bindings:
 
@@ -182,6 +188,47 @@ that is not a well-formed record.
 ## Current Limitations
 
 The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested blocks other than `def ... end`, `match ... end`, and `record ... end`, string interpolation, arrays, comments inside string literals, general method-call dot syntax, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors, types, or verification constructs.
+Formal models describe state machines at an abstraction level distinct from
+executable code. Models coexist alongside functions and statements in the
+same source file but are not compiled to BEAM — they are preserved in the
+explicit AST for future model-checking and verification passes.
+
+```yup
+model Light
+  state value = :off
+
+  transition toggle do
+    state.value = value == :off ? :on : :off
+  end
+end
+```
+
+Model declarations:
+
+- `model Name` opens a named model block. Model names start with an uppercase
+  letter.
+- `state name = expr` declares a named state field with a deterministic
+  initial value. State initializers use model expressions.
+- `transition name do … end` defines a named transition. The body describes
+  how state changes when the transition fires.
+
+Within a transition body, `state.name` reads the current value of a state
+field and `state.name = expr` sets its next value.
+
+Model expressions support a ternary conditional:
+
+```yup
+value == :off ? :on : :off
+```
+
+Models are intentionally non-executable. They parse into explicit AST nodes
+(`Yup.AST.Model`, `Yup.AST.ModelState`, `Yup.AST.Transition`,
+`Yup.AST.TernaryOp`, `Yup.AST.StateAccess`, `Yup.AST.StateUpdate`) for
+downstream analysis.
+
+## Current Limitations
+
+The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested statement blocks other than `def ... end`, `match ... end`, `model ... end`, and `transition ... end`, string interpolation, arrays, maps, comments inside string literals, dot calls, full record syntax, guards inside `when`, exhaustive matching warnings, actors, types, or verification constructs (model checking and refinement checking are not yet implemented).
 
 Boolean operators are not short-circuiting in the BEAM backend yet. `true or (1 / 0)` evaluates both sides today.
 
@@ -237,17 +284,6 @@ end
 type Percentage = Float where 0.0 <= self <= 1.0
 ```
 
-Formal models should be expressible at abstraction levels different from executable code:
-
-```yup
-model Light
-  state value = :off
-
-  transition toggle do
-    state.value = value == :off ? :on : :off
-  end
-end
-```
 
 String interpolation may eventually join the slice if it can be added without
 distorting the bootstrap parser:
