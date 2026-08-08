@@ -1,0 +1,7 @@
+def invoke(callback, value)
+  callback(value)
+end
+
+double = { |x| x * 2 }
+puts double(4)
+puts invoke(double, 5)

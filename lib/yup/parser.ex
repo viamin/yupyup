@@ -8,6 +8,7 @@ defmodule Yup.Parser do
   """
 
   alias Yup.AST.{
+    AnonymousFunction,
     BinaryOp,
     BinderPattern,
     Binding,
@@ -602,8 +603,61 @@ defmodule Yup.Parser do
     end
   end
 
+  defp parse_primary([%{type: :lbrace, line: line, column: column} | rest], path) do
+    {params, after_params} = parse_block_params(rest, path)
+    {body_expr, after_body} = parse_or(after_params, path)
+
+    case after_body do
+      [%{type: :rbrace} | tail] ->
+        {%AnonymousFunction{params: params, body: [body_expr], loc: loc(line, column)}, tail}
+
+      [%{line: line, column: column} | _] ->
+        raise source_error(path, line, column, "expected }")
+
+      [] ->
+        raise source_error(path, nil, nil, "expected }")
+    end
+  end
+
   defp parse_primary([%{value: value, line: line, column: column} | _], path) do
     raise source_error(path, line, column, "unexpected token #{value}")
+  end
+
+  defp parse_block_params([%{type: :pipe} | rest], path),
+    do: parse_block_param_names(rest, path, [])
+
+  defp parse_block_params([%{line: line, column: column} | _], path) do
+    raise source_error(path, line, column, "expected | to start block parameters")
+  end
+
+  defp parse_block_params([], path) do
+    raise source_error(path, nil, nil, "expected | to start block parameters")
+  end
+
+  defp parse_block_param_names([%{type: :pipe} | rest], _path, acc), do: {Enum.reverse(acc), rest}
+
+  defp parse_block_param_names([%{type: :identifier, value: name} | rest], path, acc) do
+    case rest do
+      [%{type: :comma} | tail] ->
+        parse_block_param_names(tail, path, [name | acc])
+
+      [%{type: :pipe} | tail] ->
+        {Enum.reverse([name | acc]), tail}
+
+      [%{line: line, column: column} | _] ->
+        raise source_error(path, line, column, "expected , or | in block parameters")
+
+      [] ->
+        raise source_error(path, nil, nil, "expected | to close block parameters")
+    end
+  end
+
+  defp parse_block_param_names([%{line: line, column: column} | _], path, _acc) do
+    raise source_error(path, line, column, "expected block parameter name")
+  end
+
+  defp parse_block_param_names([], path, _acc) do
+    raise source_error(path, nil, nil, "expected | to close block parameters")
   end
 
   defp parse_call_args([%{type: :rparen} | rest], _path, acc), do: {Enum.reverse(acc), rest}
@@ -647,7 +701,14 @@ defmodule Yup.Parser do
     end
   end
 
-  for {char, type} <- [{"(", :lparen}, {")", :rparen}, {",", :comma}] do
+  for {char, type} <- [
+        {"(", :lparen},
+        {")", :rparen},
+        {",", :comma},
+        {"{", :lbrace},
+        {"}", :rbrace},
+        {"|", :pipe}
+      ] do
     defp tokenize(<<unquote(char), rest::binary>>, line, path, column, acc) do
       token = %{type: unquote(type), value: unquote(char), line: line, column: column}
       tokenize(rest, line, path, column + 1, [token | acc])

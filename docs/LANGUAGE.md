@@ -41,6 +41,31 @@ puts name
 Rebinding the same name in a scope is a compile error and reports the source
 location of the offending line.
 
+Anonymous functions (Ruby-shaped blocks):
+
+```yup
+double = { |x| x * 2 }
+puts double(4)
+```
+
+An anonymous function is written as `{ |params| expr }`: a pipe-delimited
+parameter list followed by a single expression. It is an ordinary expression,
+so it can be bound to a name and later called, or passed to a function and
+called from inside it:
+
+```yup
+def invoke(callback, value)
+  callback(value)
+end
+
+double = { |x| x * 2 }
+puts invoke(double, 5)
+```
+
+Blocks are not a distinct kind of value from functions: an anonymous function
+literal lowers directly to a BEAM `fun` and is called the same way a bound
+name would be. There is no separate proc/lambda distinction.
+
 Operators:
 
 ```yup
@@ -117,7 +142,7 @@ type checking and refinement have a stable surface to consume.
 
 ## Current Limitations
 
-The parser is line-oriented and intentionally tiny. It does not support nested blocks other than `def ... end` and `match ... end`, string interpolation, arrays, maps, comments inside string literals, dot calls, full record syntax, guards inside `when`, exhaustive matching warnings, actors, types, or verification constructs.
+The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested statement blocks other than `def ... end` and `match ... end`, string interpolation, arrays, maps, comments inside string literals, dot calls, full record syntax, guards inside `when`, exhaustive matching warnings, actors, types, or verification constructs.
 
 Boolean operators are not short-circuiting in the BEAM backend yet. `true or (1 / 0)` evaluates both sides today.
 
@@ -137,15 +162,19 @@ operation(value, arg)
 
 for ordinary immutable values. Dot calls on actor references may instead represent message operations. The syntax can look similar while dispatch semantics depend on the receiver.
 
-Blocks should lower to ordinary first-class functions:
+The short `{ |x| x * 2 }` block form is implemented (see above). The
+Ruby-style multiline `do |value| ... end` block form is not implemented yet
+and its delimiter syntax and parser architecture requirements (the parser is
+still line-oriented) remain open questions:
 
 ```yup
-double = { |x| x * 2 }
-
 values.map do |value|
   value * 2
 end
 ```
+
+Whichever multiline form ships should still lower to an ordinary first-class
+function value, consistent with the short block form.
 
 Actors are proposed as first-class BEAM-oriented constructs:
 
