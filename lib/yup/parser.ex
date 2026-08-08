@@ -790,7 +790,6 @@ defmodule Yup.Parser do
     {%Call{name: name, args: args, loc: loc(line, column)}, remaining}
   end
 
-
   defp parse_primary(
          [
            %{type: :identifier, value: "state", line: line, column: column},
@@ -802,6 +801,7 @@ defmodule Yup.Parser do
        ) do
     {%StateAccess{name: name, loc: loc(line, column)}, rest}
   end
+
   defp parse_primary(
          [%{type: :identifier, value: name, line: line, column: column} | rest],
          _path

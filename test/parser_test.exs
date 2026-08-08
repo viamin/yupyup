@@ -457,7 +457,6 @@ defmodule Yup.ParserTest do
       state value = :off
       transition toggle do
         state.value = :on
-    end
     """
 
     assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
