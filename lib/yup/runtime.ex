@@ -14,7 +14,7 @@ defmodule Yup.Runtime do
   def equal?(left, right), do: left == right
   def not_equal?(left, right), do: left != right
   def less?(left, right), do: left < right
-  def less_or_equal?(left, right), do: left =< right
+  def less_or_equal?(left, right), do: left <= right
   def greater?(left, right), do: left > right
   def greater_or_equal?(left, right), do: left >= right
 

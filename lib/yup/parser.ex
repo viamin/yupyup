@@ -156,7 +156,14 @@ defmodule Yup.Parser do
   defp parse_binary_tail(left, [token | rest] = tokens, path, ops, next) do
     if binary_op?(token, ops) do
       {right, remaining} = next.(rest, path)
-      node = %BinaryOp{op: token.value, left: left, right: right, loc: loc(token.line, token.column)}
+
+      node = %BinaryOp{
+        op: token.value,
+        left: left,
+        right: right,
+        loc: loc(token.line, token.column)
+      }
+
       parse_binary_tail(node, remaining, path, ops, next)
     else
       {left, tokens}
