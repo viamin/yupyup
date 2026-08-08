@@ -51,6 +51,7 @@ Generated modules are named deterministically from the source path when availabl
 
 Bindings are immutable. Rebinding a name in the same scope is rejected before lowering. Erlang variables also reinforce this design choice.
 
+Records are first-class immutable product types. Their declarations live on `Yup.AST.Program.records` and are validated by `Yup.Compiler.Erlang` before lowering. Construction lowers to a BEAM map literal and field access lowers to `maps:get/2`, which keeps the runtime simple until a richer structural type system can take over.
 Model constructs (`model`, `state`, `transition`) are parsed into explicit AST nodes but are not lowered to BEAM. They are preserved in `Program.models` for future analysis passes (model checking, constraint finding) that consume the AST independently of the execution compiler.
 
 ## Open Tradeoffs

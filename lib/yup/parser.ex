@@ -15,6 +15,7 @@ defmodule Yup.Parser do
     Call,
     Constructor,
     ConstructorPattern,
+    FieldAccess,
     Function,
     Identifier,
     Literal,
@@ -24,6 +25,8 @@ defmodule Yup.Parser do
     Model,
     ModelState,
     Program,
+    Record,
+    RecordConstruction,
     StateAccess,
     StateUpdate,
     TernaryOp,
@@ -55,18 +58,25 @@ defmodule Yup.Parser do
   end
 
   defp parse_program(lines, path) do
-    {forms, rest} = parse_forms(lines, path, [])
+    {forms, rest} = parse_forms(lines, path, [], :top_level)
 
     case next_significant(rest) do
       nil ->
         functions = Enum.filter(forms, &match?(%Function{}, &1))
+        records = Enum.filter(forms, &match?(%Record{}, &1))
         models = Enum.filter(forms, &match?(%Model{}, &1))
-        body = Enum.reject(forms, &(match?(%Function{}, &1) or match?(%Model{}, &1)))
+
+        body =
+          Enum.reject(
+            forms,
+            &(match?(%Function{}, &1) or match?(%Record{}, &1) or match?(%Model{}, &1))
+          )
 
         {:ok,
          %Program{
            source_path: path,
            functions: functions,
+           records: records,
            body: body,
            models: models,
            loc: loc(1, 1)
@@ -77,15 +87,15 @@ defmodule Yup.Parser do
     end
   end
 
-  defp parse_forms([], _path, acc), do: {Enum.reverse(acc), []}
+  defp parse_forms([], _path, acc, _scope), do: {Enum.reverse(acc), []}
 
-  defp parse_forms([{line, raw} | rest] = lines, path, acc) do
+  defp parse_forms([{line, raw} | rest] = lines, path, acc, scope) do
     text = strip_comment(raw)
     trimmed = String.trim(text)
 
     cond do
       blank?(text) ->
-        parse_forms(rest, path, acc)
+        parse_forms(rest, path, acc, scope)
 
       trimmed == "end" ->
         {Enum.reverse(acc), lines}
@@ -95,19 +105,32 @@ defmodule Yup.Parser do
 
       String.starts_with?(trimmed, "def ") ->
         {function, after_function} = parse_function(line, text, rest, path)
-        parse_forms(after_function, path, [function | acc])
+        parse_forms(after_function, path, [function | acc], scope)
+
+      String.starts_with?(trimmed, "record ") or trimmed == "record" ->
+        if scope != :top_level do
+          raise source_error(
+                  path,
+                  line,
+                  1,
+                  "record declarations are only allowed at the top level"
+                )
+        end
+
+        {record, after_record} = parse_record(line, text, rest, path)
+        parse_forms(after_record, path, [record | acc], scope)
 
       String.starts_with?(trimmed, "match ") or trimmed == "match" ->
         {match, after_match} = parse_match(line, text, rest, path)
-        parse_forms(after_match, path, [match | acc])
+        parse_forms(after_match, path, [match | acc], scope)
 
       String.starts_with?(trimmed, "model ") ->
         {model, after_model} = parse_model(line, text, rest, path)
-        parse_forms(after_model, path, [model | acc])
+        parse_forms(after_model, path, [model | acc], scope)
 
       true ->
         statement = parse_statement(text, line, path)
-        parse_forms(rest, path, [statement | acc])
+        parse_forms(rest, path, [statement | acc], scope)
     end
   end
 
@@ -131,7 +154,7 @@ defmodule Yup.Parser do
             param
           end)
 
-        {body, after_body} = parse_forms(rest, path, [])
+        {body, after_body} = parse_forms(rest, path, [], :nested)
 
         close_function(after_body, name, line, path, params, body)
 
@@ -150,6 +173,55 @@ defmodule Yup.Parser do
 
   defp close_function([], name, line, path, _params, _body) do
     raise source_error(path, line, 1, "missing end for function #{name}")
+  end
+
+  defp parse_record(line, text, rest, path) do
+    trimmed = String.trim(text)
+
+    case Regex.run(~r/^record\s+([A-Z][a-zA-Z0-9_]*)\s*$/, trimmed) do
+      [_, name] ->
+        {fields, after_body} = parse_record_fields(rest, path, [])
+        close_record(after_body, name, line, path, fields)
+
+      _ ->
+        raise source_error(path, line, 1, "expected record declaration like record Person")
+    end
+  end
+
+  defp close_record([{_end_line, end_text} | remaining], name, line, _path, fields) do
+    if String.trim(end_text) == "end" do
+      {%Record{name: name, fields: fields, loc: loc(line, 1)}, remaining}
+    else
+      raise "internal parser error: record close called without end"
+    end
+  end
+
+  defp close_record([], name, line, path, _fields) do
+    raise source_error(path, line, 1, "missing end for record #{name}")
+  end
+
+  defp parse_record_fields([], _path, acc), do: {Enum.reverse(acc), []}
+
+  defp parse_record_fields([{line, raw} | rest] = lines, path, acc) do
+    text = strip_comment(raw)
+    trimmed = String.trim(text)
+
+    cond do
+      blank?(text) ->
+        parse_record_fields(rest, path, acc)
+
+      trimmed == "end" ->
+        {Enum.reverse(acc), lines}
+
+      true ->
+        case Regex.run(~r/^([a-z_][a-zA-Z0-9_?!]*)\s*$/, trimmed) do
+          [_, field] ->
+            parse_record_fields(rest, path, [field | acc])
+
+          _ ->
+            raise source_error(path, line, 1, "expected field name or end in record body")
+        end
+    end
   end
 
   defp parse_match(line, text, rest, path) do
@@ -736,7 +808,28 @@ defmodule Yup.Parser do
     {%UnaryOp{op: "not", operand: operand, loc: loc(line, column)}, remaining}
   end
 
-  defp parse_unary(tokens, path), do: parse_primary(tokens, path)
+  defp parse_unary(tokens, path), do: parse_postfix(tokens, path)
+
+  defp parse_postfix(tokens, path) do
+    {expr, rest} = parse_primary(tokens, path)
+    parse_postfix_tail(expr, rest, path)
+  end
+
+  defp parse_postfix_tail(expr, [%{type: :dot, line: dot_line, column: dot_column} | rest], path) do
+    case rest do
+      [%{type: :identifier, value: field, line: line, column: column} | after_field] ->
+        node = %FieldAccess{record: expr, field: field, loc: loc(line, column)}
+        parse_postfix_tail(node, after_field, path)
+
+      [%{line: line, column: column} | _] ->
+        raise source_error(path, line, column, "expected field name after .")
+
+      [] ->
+        raise source_error(path, dot_line, dot_column, "expected field name after .")
+    end
+  end
+
+  defp parse_postfix_tail(expr, rest, _path), do: {expr, rest}
 
   defp parse_primary([], path),
     do: raise(source_error(path, nil, nil, "unexpected end of expression"))
@@ -788,6 +881,19 @@ defmodule Yup.Parser do
        ) do
     {args, remaining} = parse_call_args(rest, path, [])
     {%Constructor{tag: tag, args: args, loc: loc(line, column)}, remaining}
+  end
+
+  defp parse_primary(
+         [
+           %{type: :tag, value: tag, line: tl, column: tc},
+           %{type: :dot},
+           %{type: :identifier, value: "new", line: _ml, column: _mc},
+           %{type: :lparen} | rest
+         ],
+         path
+       ) do
+    {fields, remaining} = parse_record_construction_args(rest, path, [])
+    {%RecordConstruction{name: tag, fields: fields, loc: loc(tl, tc)}, remaining}
   end
 
   defp parse_primary(
@@ -904,6 +1010,40 @@ defmodule Yup.Parser do
     end
   end
 
+  defp parse_record_construction_args([%{type: :rparen} | rest], _path, acc),
+    do: {Enum.reverse(acc), rest}
+
+  defp parse_record_construction_args(
+         [%{type: :kwarg, value: name, line: line, column: column} | rest],
+         path,
+         acc
+       ) do
+    {value, after_value} = parse_or(rest, path)
+    field = {name, value, loc(line, column)}
+
+    case after_value do
+      [%{type: :comma} | tail] ->
+        parse_record_construction_args(tail, path, [field | acc])
+
+      [%{type: :rparen} | tail] ->
+        {Enum.reverse([field | acc]), tail}
+
+      [%{line: el, column: ec} | _] ->
+        raise source_error(path, el, ec, "expected , or ) in record fields")
+
+      [] ->
+        raise source_error(path, nil, nil, "expected ) in record fields")
+    end
+  end
+
+  defp parse_record_construction_args([%{line: line, column: column} | _], path, _acc) do
+    raise source_error(path, line, column, "expected field name in record construction")
+  end
+
+  defp parse_record_construction_args([], path, _acc) do
+    raise source_error(path, nil, nil, "expected ) in record construction")
+  end
+
   defp tokenize(text, line, path), do: tokenize(text, line, path, 1, [])
 
   defp tokenize("", _line, _path, _column, acc), do: Enum.reverse(acc)
@@ -993,8 +1133,15 @@ defmodule Yup.Parser do
     {value, rest} =
       take_while(text, &(&1 in ?a..?z or &1 in ?A..?Z or &1 in ?0..?9 or &1 in [?_, ??, ?!]))
 
-    token = %{type: :identifier, value: value, line: line, column: column}
-    tokenize(rest, line, path, column + byte_size(value), [token | acc])
+    case rest do
+      <<":", after_colon::binary>> ->
+        token = %{type: :kwarg, value: value, line: line, column: column}
+        tokenize(after_colon, line, path, column + byte_size(value) + 1, [token | acc])
+
+      _ ->
+        token = %{type: :identifier, value: value, line: line, column: column}
+        tokenize(rest, line, path, column + byte_size(value), [token | acc])
+    end
   end
 
   defp tokenize(<<char, _rest::binary>>, line, path, column, _acc) do

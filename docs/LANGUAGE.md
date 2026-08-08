@@ -146,6 +146,48 @@ nodes (`Yup.AST.LiteralPattern`, `Yup.AST.BinderPattern`,
 `Yup.AST.ConstructorPattern`, `Yup.AST.Constructor`), so later passes such as
 type checking and refinement have a stable surface to consume.
 
+## Records
+
+Records are immutable product types. A record declaration names a type and
+lists its fields. Declarations live at the top of a `.yup` file:
+
+```yup
+record Person
+  name
+  age
+end
+```
+
+A record is constructed with `Type.new(name: value, ...)` using keyword
+arguments:
+
+```yup
+person = Person.new(name: "Ada", age: 42)
+```
+
+Each declared field must be supplied exactly once; supplying an unknown field
+or omitting a declared field is a compile error and reports the offending
+source location.
+
+Field access uses dot syntax. Reads are immutable; a record value never
+changes after construction. A "copy with a change" pattern works by
+constructing a new record and reusing fields from the old one:
+
+```yup
+def rename(person, new_name)
+  Person.new(name: new_name, age: person.age)
+end
+```
+
+Records lower to BEAM maps at the moment, which keeps them compatible with
+ordinary `maps:get/2` semantics while richer structural typing is being
+designed. Field access like `person.name` lowers to `maps:get(:name, person)`
+and produces a `badkey` error at runtime if the field is absent on a value
+that is not a well-formed record.
+
+## Current Limitations
+
+The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested blocks other than `def ... end`, `match ... end`, and `record ... end`, string interpolation, arrays, comments inside string literals, general method-call dot syntax, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors, types, or verification constructs.
 Formal models describe state machines at an abstraction level distinct from
 executable code. Models coexist alongside functions and statements in the
 same source file but are not compiled to BEAM — they are preserved in the

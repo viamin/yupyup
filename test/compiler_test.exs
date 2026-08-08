@@ -503,6 +503,270 @@ defmodule Yup.CompilerTest do
     end)
   end
 
+  test "constructs and reads a record field on the BEAM" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    person = Person.new(name: "Ada", age: 42)
+    puts person.name
+    puts person.age
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "Ada\n42\n"
+  end
+
+  test "records support nested field access" do
+    source = """
+    record Point
+      x
+      y
+    end
+
+    point = Point.new(x: 1, y: 2)
+    puts point.x + point.y
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "3\n"
+  end
+
+  test "records are immutable across rebinding" do
+    source = """
+    record Person
+      name
+    end
+
+    first = Person.new(name: "Ada")
+    second = Person.new(name: "Grace")
+    puts first.name
+    puts second.name
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "Ada\nGrace\n"
+  end
+
+  test "records can be used as function parameters and returns" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    def rename(person, new_name)
+      Person.new(name: new_name, age: person.age)
+    end
+
+    person = Person.new(name: "Ada", age: 42)
+    updated = rename(person, "Grace")
+    puts updated.name
+    puts updated.age
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "Grace\n42\n"
+  end
+
+  test "rejects construction of an undeclared record" do
+    source = """
+    person = Person.new(name: "Ada", age: 42)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    assert_raise Yup.SourceError, ~r/unknown record type Person/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects record construction with unknown field" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    person = Person.new(name: "Ada", age: 42, weight: 70)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    assert_raise Yup.SourceError, ~r/record Person has no field weight/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects record construction missing a required field" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    person = Person.new(name: "Ada")
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    assert_raise Yup.SourceError, ~r/record Person is missing field age/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects record construction with duplicate field" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    person = Person.new(name: "Ada", name: "Bob")
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    assert_raise Yup.SourceError, ~r/duplicate field name in record Person construction/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects undeclared record construction used as a match subject" do
+    source = """
+    match Person.new(name: "Ada", age: 42)
+    when _
+      puts "any"
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    assert_raise Yup.SourceError, ~r/unknown record type Person/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects unknown field in record construction used as a match subject" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    match Person.new(name: "Ada", age: 42, weight: 70)
+    when _
+      puts "any"
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    assert_raise Yup.SourceError, ~r/record Person has no field weight/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects missing field in record construction used as a match subject" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    match Person.new(name: "Ada")
+    when _
+      puts "any"
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    assert_raise Yup.SourceError, ~r/record Person is missing field age/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "valid record construction as a match subject compiles and runs" do
+    source = """
+    record Person
+      name
+    end
+
+    match Person.new(name: "Ada")
+    when _
+      puts "any"
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "any\n"
+  end
+
+  test "field access raises at runtime for missing keys" do
+    source = """
+    record Person
+      name
+    end
+
+    person = Person.new(name: "Ada")
+    puts person.age
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    capture_io(fn ->
+      assert {:ok, module} = Yup.Compiler.compile(program)
+
+      result =
+        try do
+          Yup.Compiler.run(module)
+        catch
+          :error, {:badkey, :age} -> :badkey
+          :error, {:badkey, key} -> key
+        end
+
+      assert result == :badkey or result == :age
+    end)
+  end
+
   test "compiles program with models alongside executable code" do
     source = """
     model Light

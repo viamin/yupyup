@@ -11,6 +11,7 @@ defmodule Yup.Compiler.Erlang do
     Call,
     Constructor,
     ConstructorPattern,
+    FieldAccess,
     Function,
     Identifier,
     Literal,
@@ -18,6 +19,8 @@ defmodule Yup.Compiler.Erlang do
     Match,
     MatchClause,
     Program,
+    Record,
+    RecordConstruction,
     UnaryOp
   }
 
@@ -39,6 +42,7 @@ defmodule Yup.Compiler.Erlang do
 
   def lower(%Program{} = program) do
     validate_immutable_bindings!(program)
+    validate_record_constructions!(program)
 
     Process.put(:yup_fresh_counter, :counters.new(1, []))
     module = module_name(program)
@@ -135,6 +139,27 @@ defmodule Yup.Compiler.Erlang do
     {:tuple, line(node), elements}
   end
 
+  defp expr(%RecordConstruction{name: _name, fields: fields} = node, function_names) do
+    line = line(node)
+
+    field_asts =
+      Enum.map(fields, fn {field_name, value, _field_loc} ->
+        {:map_field_assoc, line, {:atom, line, String.to_atom(field_name)},
+         expr(value, function_names)}
+      end)
+
+    {:map, line, field_asts}
+  end
+
+  defp expr(%FieldAccess{record: record, field: field} = node, function_names) do
+    remote_call(
+      line(node),
+      :maps,
+      :get,
+      [{:atom, line(node), String.to_atom(field)}, expr(record, function_names)]
+    )
+  end
+
   defp expr(%Match{subject: subject, clauses: clauses} = node, function_names) do
     subject_expr = expr(subject, function_names)
     counter = shared_counter()
@@ -228,6 +253,19 @@ defmodule Yup.Compiler.Erlang do
     %{node | args: Enum.map(args, &rename_in_node(&1, mapping))}
   end
 
+  defp rename_in_node(%FieldAccess{record: record} = node, mapping) do
+    %{node | record: rename_in_node(record, mapping)}
+  end
+
+  defp rename_in_node(%RecordConstruction{fields: fields} = node, mapping) do
+    renamed =
+      Enum.map(fields, fn {name, value, field_loc} ->
+        {name, rename_in_node(value, mapping), field_loc}
+      end)
+
+    %{node | fields: renamed}
+  end
+
   defp rename_in_node(%Binding{value: value} = node, mapping) do
     %{node | value: rename_in_node(value, mapping)}
   end
@@ -288,6 +326,128 @@ defmodule Yup.Compiler.Erlang do
       bound = reserved |> MapSet.union(MapSet.new(function.params))
       validate_scope!(function.body, bound, program.source_path)
     end)
+  end
+
+  defp validate_record_constructions!(%Program{} = program) do
+    declarations = record_declarations(program.records)
+    check_nodes(program.body, declarations, program.source_path)
+
+    Enum.each(program.functions, fn function ->
+      check_nodes(function.body, declarations, program.source_path)
+    end)
+  end
+
+  defp record_declarations(records) do
+    Map.new(records, fn %Record{name: name, fields: fields, loc: loc} ->
+      {name, %{fields: MapSet.new(fields), loc: loc}}
+    end)
+  end
+
+  defp check_nodes(nodes, declarations, path) do
+    Enum.each(nodes, fn node -> check_node(node, declarations, path) end)
+  end
+
+  defp check_node(%Match{subject: subject, clauses: clauses}, declarations, path) do
+    check_node(subject, declarations, path)
+
+    Enum.each(clauses, fn %MatchClause{body: body} ->
+      check_nodes(body, declarations, path)
+    end)
+  end
+
+  defp check_node(%Binding{value: value}, declarations, path),
+    do: check_node(value, declarations, path)
+
+  defp check_node(%AnonymousFunction{body: body}, declarations, path) do
+    check_nodes(body, declarations, path)
+  end
+
+  defp check_node(%BinaryOp{left: left, right: right}, declarations, path) do
+    check_node(left, declarations, path)
+    check_node(right, declarations, path)
+  end
+
+  defp check_node(%UnaryOp{operand: operand}, declarations, path),
+    do: check_node(operand, declarations, path)
+
+  defp check_node(%Call{args: args}, declarations, path) do
+    Enum.each(args, fn arg -> check_node(arg, declarations, path) end)
+  end
+
+  defp check_node(%Constructor{args: args}, declarations, path) do
+    Enum.each(args, fn arg -> check_node(arg, declarations, path) end)
+  end
+
+  defp check_node(%FieldAccess{record: record}, declarations, path),
+    do: check_node(record, declarations, path)
+
+  defp check_node(%RecordConstruction{fields: fields} = node, declarations, path) do
+    validate_record(node, declarations, path)
+
+    Enum.each(fields, fn {_name, value, _loc} -> check_node(value, declarations, path) end)
+  end
+
+  defp check_node(_node, _declarations, _path), do: :ok
+
+  defp validate_record(
+         %RecordConstruction{name: name, fields: fields, loc: loc},
+         declarations,
+         path
+       ) do
+    case Map.fetch(declarations, name) do
+      :error ->
+        raise %SourceError{
+          path: path,
+          line: loc.line,
+          column: loc.column,
+          message: "unknown record type #{name}"
+        }
+
+      {:ok, %{fields: declared_fields}} ->
+        result =
+          Enum.reduce_while(fields, MapSet.new(), fn {n, _v, loc}, seen ->
+            if MapSet.member?(seen, n),
+              do: {:halt, {:dup, n, loc}},
+              else: {:cont, MapSet.put(seen, n)}
+          end)
+
+        case result do
+          {:dup, dup_name, dup_loc} ->
+            raise %SourceError{
+              path: path,
+              line: dup_loc.line,
+              column: dup_loc.column,
+              message: "duplicate field #{dup_name} in record #{name} construction"
+            }
+
+          provided ->
+            case MapSet.difference(provided, declared_fields) |> Enum.take(1) do
+              [unknown | _] ->
+                {_, _, field_loc} = Enum.find(fields, fn {n, _v, _l} -> n == unknown end)
+
+                raise %SourceError{
+                  path: path,
+                  line: field_loc.line,
+                  column: field_loc.column,
+                  message: "record #{name} has no field #{unknown}"
+                }
+
+              [] ->
+                case MapSet.difference(declared_fields, provided) |> Enum.take(1) do
+                  [missing | _] ->
+                    raise %SourceError{
+                      path: path,
+                      line: loc.line,
+                      column: loc.column,
+                      message: "record #{name} is missing field #{missing}"
+                    }
+
+                  [] ->
+                    :ok
+                end
+            end
+        end
+    end
   end
 
   defp reserved_names(%Program{} = program) do
