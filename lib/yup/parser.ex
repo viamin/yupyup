@@ -24,13 +24,16 @@ defmodule Yup.Parser do
     MatchClause,
     Model,
     ModelState,
+    Parameter,
     Program,
     Record,
     RecordConstruction,
+    RecordField,
     StateAccess,
     StateUpdate,
     TernaryOp,
     Transition,
+    TypeRef,
     UnaryOp
   }
 
@@ -141,37 +144,126 @@ defmodule Yup.Parser do
   defp parse_function(line, text, rest, path) do
     trimmed = String.trim(text)
 
-    case Regex.run(~r/^def\s+([a-z_][a-zA-Z0-9_?!]*)\(([^)]*)\)\s*$/, trimmed) do
-      [_, name, params_text] ->
-        params =
-          params_text
-          |> split_args()
-          |> Enum.map(fn param ->
-            unless Regex.match?(~r/^[a-z_][a-zA-Z0-9_?!]*$/, param) do
-              raise source_error(path, line, 1, "invalid parameter name #{inspect(param)}")
-            end
-
-            param
-          end)
+    case Regex.run(
+           ~r/^def\s+([a-z_][a-zA-Z0-9_?!]*)\(([^)]*)\)(?:\s*->\s*([A-Z][a-zA-Z0-9_]*))?\s*$/,
+           trimmed
+         ) do
+      [_, name, params_text, return_type_name] ->
+        params = parse_params(params_text, line, trimmed, path)
+        return_type = type_ref_for(return_type_name, trimmed, :arrow, line, path)
 
         {body, after_body} = parse_forms(rest, path, [], :nested)
 
-        close_function(after_body, name, line, path, params, body)
+        close_function(after_body, name, line, path, params, body, return_type)
+
+      [_, name, params_text] ->
+        params = parse_params(params_text, line, trimmed, path)
+
+        {body, after_body} = parse_forms(rest, path, [], :nested)
+
+        close_function(after_body, name, line, path, params, body, nil)
 
       _ ->
         raise source_error(path, line, 1, "expected function definition like def hello(name)")
     end
   end
 
-  defp close_function([{_end_line, end_text} | remaining], name, line, _path, params, body) do
+  defp parse_params(params_text, line, source, path) do
+    params_text
+    |> split_args()
+    |> Enum.map(&parse_param(&1, line, source, path))
+  end
+
+  defp parse_param(text, line, source, path) do
+    trimmed = String.trim(text)
+
+    case Regex.run(
+           ~r/^([a-z_][a-zA-Z0-9_?!]*)(?:\s*:\s*([A-Z][a-zA-Z0-9_]*))?$/,
+           trimmed
+         ) do
+      [_, name, type_name] ->
+        type = type_ref_for(type_name, source, :colon, line, path)
+        %Parameter{name: name, type: type, loc: loc(line, column_in(source, name))}
+
+      [_, name] ->
+        %Parameter{name: name, loc: loc(line, column_in(source, name))}
+
+      nil ->
+        raise source_error(path, line, 1, "invalid parameter #{inspect(text)}")
+    end
+  end
+
+  defp type_ref_for(nil, _source, _anchor, _line, _path), do: nil
+
+  defp type_ref_for(type_name, source, anchor, line, path) do
+    case find_after(source, anchor_marker(anchor)) do
+      {:ok, offset, rest} ->
+        case :binary.match(rest, type_name) do
+          {type_pos, _} ->
+            %TypeRef{name: type_name, loc: loc(line, offset + type_pos + 1)}
+
+          :nomatch ->
+            %TypeRef{name: type_name, loc: loc(line, 1)}
+        end
+
+      :error ->
+        raise source_error(
+                path,
+                line,
+                byte_size(source),
+                "expected type annotation #{inspect(type_name)}"
+              )
+    end
+  end
+
+  defp anchor_marker(:colon), do: ":"
+  defp anchor_marker(:arrow), do: "->"
+
+  defp find_after(source, marker) do
+    case :binary.match(source, marker) do
+      {pos, len} ->
+        {:ok, pos + len, binary_part(source, pos + len, byte_size(source) - pos - len)}
+
+      :nomatch ->
+        :error
+    end
+  end
+
+  defp column_in(source, needle) when is_binary(source) and is_binary(needle) do
+    case :binary.match(source, needle) do
+      {pos, _length} -> pos + 1
+      :nomatch -> 1
+    end
+  end
+
+  defp column_in(_source, _needle), do: 1
+
+  defp close_function(
+         [{_end_line, end_text} | remaining],
+         name,
+         line,
+         _path,
+         params,
+         body,
+         return_type
+       ) do
     if String.trim(end_text) == "end" do
-      {%Function{name: name, params: params, body: body, loc: loc(line, 1)}, remaining}
+      fn_ast =
+        %Function{
+          name: name,
+          params: params,
+          body: body,
+          return_type: return_type,
+          loc: loc(line, 1)
+        }
+
+      {fn_ast, remaining}
     else
       raise "internal parser error: function close called without end"
     end
   end
 
-  defp close_function([], name, line, path, _params, _body) do
+  defp close_function([], name, line, path, _params, _body, _return_type) do
     raise source_error(path, line, 1, "missing end for function #{name}")
   end
 
@@ -214,9 +306,22 @@ defmodule Yup.Parser do
         {Enum.reverse(acc), lines}
 
       true ->
-        case Regex.run(~r/^([a-z_][a-zA-Z0-9_?!]*)\s*$/, trimmed) do
+        case Regex.run(
+               ~r/^([a-z_][a-zA-Z0-9_?!]*)(?:\s*:\s*([A-Z][a-zA-Z0-9_]*))?\s*$/,
+               trimmed
+             ) do
+          [_, field, type_name] ->
+            field_ast =
+              %RecordField{
+                name: field,
+                type: type_ref_for(type_name, trimmed, :colon, line, path),
+                loc: loc(line, column_in(trimmed, field))
+              }
+
+            parse_record_fields(rest, path, [field_ast | acc])
+
           [_, field] ->
-            parse_record_fields(rest, path, [field | acc])
+            parse_record_fields(rest, path, [%RecordField{name: field, loc: loc(line, 1)} | acc])
 
           _ ->
             raise source_error(path, line, 1, "expected field name or end in record body")

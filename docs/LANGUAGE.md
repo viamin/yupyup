@@ -185,9 +185,74 @@ designed. Field access like `person.name` lowers to `maps:get(:name, person)`
 and produces a `badkey` error at runtime if the field is absent on a value
 that is not a well-formed record.
 
+## Type Annotations
+
+YupYup parses type annotations as first-class syntax so future checkers can
+consume the YupYup AST directly. Untyped code remains the default; annotations
+are additive.
+
+Function parameter annotations:
+
+```yup
+def greet(person: Person)
+  "Hello, " + person
+end
+```
+
+Function return annotations:
+
+```yup
+def hello(name) -> String
+  "Hello, " + name
+end
+```
+
+Record field annotations:
+
+```yup
+record Person
+  name: String
+  age: Integer
+end
+```
+
+An annotation references a type by an uppercase identifier. The bootstrap
+parser stores annotations on the AST:
+
+- A function parameter becomes a `Yup.AST.Parameter` whose `type` field holds
+  either `nil` (unannotated) or a `Yup.AST.TypeRef{name: ...}` carrying its
+  source location.
+- A function's optional return type lives on `Yup.AST.Function.return_type`
+  and is `nil` when omitted.
+- A record field becomes a `Yup.AST.RecordField` with the same optional
+  `type: nil | TypeRef` shape.
+
+### Checker Non-Goals In This Slice
+
+The bootstrap deliberately does **not** enforce annotations. A future gradual
+structural type checker will own that responsibility. Specifically, the
+current slice does not:
+
+- Check that an argument matches its declared parameter type.
+- Check that a returned value matches the declared return type.
+- Check that a record construction supplies values whose dynamic types match
+  the field annotations.
+- Infer types from expression bodies.
+- Track refined types, generic constraints, or generic instantiations.
+- Treat annotation mismatches as runtime errors or warnings.
+
+Untyped and annotated programs compile and run identically today. The
+annotations are preserved in the AST so a future checker has the source
+intent available without a separate annotation sidecar.
+
 ## Current Limitations
 
-The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested blocks other than `def ... end`, `match ... end`, and `record ... end`, string interpolation, arrays, comments inside string literals, general method-call dot syntax, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors, types, or verification constructs.
+The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested blocks other than `def ... end`, `match ... end`, and `record ... end`, string interpolation, arrays, comments inside string literals, general method-call dot syntax, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors, full type checking, or verification constructs.
+
+Type annotations are parsed and preserved on the AST but the bootstrap does
+not enforce them. See [Type Annotations](#type-annotations) above and the
+checker non-goals listed there for what is intentionally out of scope today.
+
 Formal models describe state machines at an abstraction level distinct from
 executable code. Models coexist alongside functions and statements in the
 same source file but are not compiled to BEAM — they are preserved in the
@@ -225,10 +290,6 @@ Models are intentionally non-executable. They parse into explicit AST nodes
 (`Yup.AST.Model`, `Yup.AST.ModelState`, `Yup.AST.Transition`,
 `Yup.AST.TernaryOp`, `Yup.AST.StateAccess`, `Yup.AST.StateUpdate`) for
 downstream analysis.
-
-## Current Limitations
-
-The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested statement blocks other than `def ... end`, `match ... end`, `model ... end`, and `transition ... end`, string interpolation, arrays, maps, comments inside string literals, dot calls, full record syntax, guards inside `when`, exhaustive matching warnings, actors, types, or verification constructs (model checking and refinement checking are not yet implemented).
 
 Boolean operators are not short-circuiting in the BEAM backend yet. `true or (1 / 0)` evaluates both sides today.
 
@@ -274,13 +335,12 @@ actor Counter
 end
 ```
 
-Types should be native, gradual, and structural:
+The parser now records type annotations on the AST, but the gradual
+structural checker that should consume them, the syntax for declaring new
+structural types, refined types, and pre/postconditions, and how annotations
+interact with actor boundaries are still proposed and unresolved:
 
 ```yup
-def greet(person: Person) -> String
-  "Hello, " + person.name
-end
-
 type Percentage = Float where 0.0 <= self <= 1.0
 ```
 
