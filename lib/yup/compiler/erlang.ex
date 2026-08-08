@@ -17,6 +17,11 @@ defmodule Yup.Compiler.Erlang do
 
   alias Yup.SourceError
 
+  # Names whose binding is reserved by the language: `puts` resolves to
+  # `Yup.Runtime.puts/1` regardless of caller-scope state, so a local binding
+  # would otherwise be silently shadowed by the dispatch clause above.
+  @reserved_names MapSet.new(["puts"])
+
   def module_name(%Program{} = program) do
     key = program.source_path || :erlang.term_to_binary(program)
 
@@ -140,12 +145,34 @@ defmodule Yup.Compiler.Erlang do
   end
 
   defp validate_immutable_bindings!(%Program{} = program) do
-    validate_scope!(program.body, MapSet.new(), program.source_path)
+    # Top-level `def`s and reserved runtime names occupy names that the
+    # dispatch pass treats as direct atom calls (or remote `Runtime.puts/1`
+    # calls). Without seeding the validator's bound set with them, a local
+    # binding would be accepted here and then silently shadowed at lowering.
+    reserved = reserved_names(program)
 
     Enum.each(program.functions, fn function ->
-      bound = MapSet.new(function.params)
+      if MapSet.member?(@reserved_names, function.name) do
+        raise %SourceError{
+          path: program.source_path,
+          line: line(function),
+          column: column(function),
+          message: "cannot define function with reserved name #{function.name}"
+        }
+      end
+    end)
+
+    validate_scope!(program.body, reserved, program.source_path)
+
+    Enum.each(program.functions, fn function ->
+      bound = reserved |> MapSet.union(MapSet.new(function.params))
       validate_scope!(function.body, bound, program.source_path)
     end)
+  end
+
+  defp reserved_names(%Program{} = program) do
+    MapSet.new(program.functions, & &1.name)
+    |> MapSet.union(@reserved_names)
   end
 
   defp validate_scope!(nodes, bound, path) do
