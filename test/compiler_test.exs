@@ -766,6 +766,7 @@ defmodule Yup.CompilerTest do
       assert result == :badkey or result == :age
     end)
   end
+
   test "compiles program with models alongside executable code" do
     source = """
     model Light

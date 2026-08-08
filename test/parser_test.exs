@@ -481,11 +481,9 @@ defmodule Yup.ParserTest do
             }} = Yup.Parser.parse("1 + person.age", path: "expr.yup")
   end
 
-  test "reports stray colon as an error" do
-    assert {:error, %Yup.SourceError{} = error} =
-             Yup.Parser.parse("puts :weird", path: "bad.yup")
-
-    assert error.message =~ "unexpected character"
+  test "parses standalone atom literals" do
+    assert {:ok, %Program{body: [%Call{args: [%Literal{kind: :atom, value: :weird}]}]}} =
+             Yup.Parser.parse("puts :weird", path: "atom.yup")
   end
 
   test "reports missing end for record" do

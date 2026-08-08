@@ -65,7 +65,12 @@ defmodule Yup.Parser do
         functions = Enum.filter(forms, &match?(%Function{}, &1))
         records = Enum.filter(forms, &match?(%Record{}, &1))
         models = Enum.filter(forms, &match?(%Model{}, &1))
-        body = Enum.reject(forms, &(match?(%Function{}, &1) or match?(%Record{}, &1) or match?(%Model{}, &1)))
+
+        body =
+          Enum.reject(
+            forms,
+            &(match?(%Function{}, &1) or match?(%Record{}, &1) or match?(%Model{}, &1))
+          )
 
         {:ok,
          %Program{
@@ -121,7 +126,7 @@ defmodule Yup.Parser do
 
       String.starts_with?(trimmed, "model ") ->
         {model, after_model} = parse_model(line, text, rest, path)
-        parse_forms(after_model, path, [model | acc])
+        parse_forms(after_model, path, [model | acc], scope)
 
       true ->
         statement = parse_statement(text, line, path)
