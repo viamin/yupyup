@@ -932,8 +932,50 @@ defmodule Yup.ParserTest do
                   fields: [
                     %RecordField{
                       name: "name",
-                      type: %TypeRef{name: "String", loc: %{line: 2, column: _}}
+                      loc: %{line: 2, column: field_column},
+                      type: %TypeRef{name: "String", loc: %{line: 2, column: type_column}}
                     }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "annotated.yup")
+
+    assert field_column == 3
+    assert type_column == 9
+  end
+
+  test "preserves source locations on deeply indented record field type annotations" do
+    source = "record Person\n        name: String\n      end\n"
+
+    assert {:ok,
+            %Program{
+              records: [
+                %Record{
+                  fields: [
+                    %RecordField{
+                      name: "name",
+                      loc: %{line: 2, column: field_column},
+                      type: %TypeRef{name: "String", loc: %{line: 2, column: type_column}}
+                    }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "annotated.yup")
+
+    assert field_column == 9
+    assert type_column == 15
+  end
+
+  test "preserves source locations on unannotated indented record fields" do
+    source = "record Person\n    name\n    age\n  end\n"
+
+    assert {:ok,
+            %Program{
+              records: [
+                %Record{
+                  fields: [
+                    %RecordField{name: "name", loc: %{line: 2, column: 5}},
+                    %RecordField{name: "age", loc: %{line: 3, column: 5}}
                   ]
                 }
               ]

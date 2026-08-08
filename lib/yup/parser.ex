@@ -314,14 +314,16 @@ defmodule Yup.Parser do
             field_ast =
               %RecordField{
                 name: field,
-                type: type_ref_for(type_name, trimmed, :colon, line, path),
-                loc: loc(line, column_in(trimmed, field))
+                type: type_ref_for(type_name, text, :colon, line, path),
+                loc: loc(line, column_in(text, field))
               }
 
             parse_record_fields(rest, path, [field_ast | acc])
 
           [_, field] ->
-            parse_record_fields(rest, path, [%RecordField{name: field, loc: loc(line, 1)} | acc])
+            parse_record_fields(rest, path, [
+              %RecordField{name: field, loc: loc(line, column_in(text, field))} | acc
+            ])
 
           _ ->
             raise source_error(path, line, 1, "expected field name or end in record body")
