@@ -195,7 +195,11 @@ defmodule Yup.Compiler.Erlang do
   end
 
   defp rename_in_node(%Match{subject: subject, clauses: clauses} = node, mapping) do
-    %{node | subject: rename_in_node(subject, mapping), clauses: Enum.map(clauses, &rename_in_clause(&1, mapping))}
+    %{
+      node
+      | subject: rename_in_node(subject, mapping),
+        clauses: Enum.map(clauses, &rename_in_clause(&1, mapping))
+    }
   end
 
   defp rename_in_clause(%MatchClause{pattern: _pattern, body: body} = clause, mapping) do
@@ -241,11 +245,12 @@ defmodule Yup.Compiler.Erlang do
         MapSet.put(seen, name)
 
       %Match{clauses: clauses}, seen ->
-        Enum.reduce(clauses, seen, fn %MatchClause{pattern: pattern, body: body}, seen ->
-          seen
-          |> add_binder_names(pattern)
-          |> validate_scope!(body, path)
+        Enum.each(clauses, fn %MatchClause{pattern: pattern, body: body} ->
+          updated = add_binder_names(seen, pattern)
+          validate_scope!(body, updated, path)
         end)
+
+        seen
 
       _node, seen ->
         seen
@@ -257,7 +262,7 @@ defmodule Yup.Compiler.Erlang do
   defp add_binder_names(seen, %BinderPattern{name: name}), do: MapSet.put(seen, name)
 
   defp add_binder_names(seen, %ConstructorPattern{args: args}),
-    do: Enum.reduce(args, seen, &add_binder_names/2)
+    do: Enum.reduce(args, seen, fn arg, acc -> add_binder_names(acc, arg) end)
 
   defp add_binder_names(seen, _pattern), do: seen
 
