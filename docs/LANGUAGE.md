@@ -98,9 +98,51 @@ Operator precedence, from highest to lowest:
 `and`, `or`, and `not` use Ruby-like truthiness: only `nil` and `false` are
 falsy. All other values are truthy. `==` and `!=` follow BEAM loose equality.
 
+Pattern matching against literals and tagged values:
+
+```yup
+result = Ok(42)
+
+match result
+when Ok(value)
+  puts "ok: " + value
+when Error(reason)
+  puts "err: " + reason
+end
+```
+
+Patterns supported in this slice:
+
+- Literal patterns: `when 42`, `when "hello"`, `when true`, `when nil`.
+- Binder patterns: `when value` binds the matched subject to `value`.
+- Constructor patterns: `when Ok(value)` matches the tagged value `Ok(value)`
+  and binds `value` to the inner payload.
+
+Constructors are written with an uppercase tag followed by an argument list:
+
+```yup
+answer = Ok(42)
+reason = Error("nope")
+```
+
+A constructor expression such as `Ok(42)` lowers to the tagged tuple
+`{:ok, 42}` and matches the pattern `Ok(value)` against that tuple. The full
+tag/arity space is intentionally small until records and richer data
+constructors join the language.
+
+`match` lowers to a BEAM `case` expression. The first matching clause runs.
+If no clause matches, the program raises a BEAM `case_clause` error, just like
+an unmatched Erlang case.
+
+Pattern matching is supported at the top level of a program or function body,
+and within a `match` clause body. Patterns and expressions are distinct AST
+nodes (`Yup.AST.LiteralPattern`, `Yup.AST.BinderPattern`,
+`Yup.AST.ConstructorPattern`, `Yup.AST.Constructor`), so later passes such as
+type checking and refinement have a stable surface to consume.
+
 ## Current Limitations
 
-The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested statement blocks other than `def ... end`, string interpolation, arrays, maps, comments inside string literals, dot calls, pattern matching, actors, types, or verification constructs.
+The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested statement blocks other than `def ... end` and `match ... end`, string interpolation, arrays, maps, comments inside string literals, dot calls, full record syntax, guards inside `when`, exhaustive matching warnings, actors, types, or verification constructs.
 
 Boolean operators are not short-circuiting in the BEAM backend yet. `true or (1 / 0)` evaluates both sides today.
 

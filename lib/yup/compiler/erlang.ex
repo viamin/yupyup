@@ -6,11 +6,17 @@ defmodule Yup.Compiler.Erlang do
   alias Yup.AST.{
     AnonymousFunction,
     BinaryOp,
+    BinderPattern,
     Binding,
     Call,
+    Constructor,
+    ConstructorPattern,
     Function,
     Identifier,
     Literal,
+    LiteralPattern,
+    Match,
+    MatchClause,
     Program,
     UnaryOp
   }
@@ -34,6 +40,7 @@ defmodule Yup.Compiler.Erlang do
   def lower(%Program{} = program) do
     validate_immutable_bindings!(program)
 
+    Process.put(:yup_fresh_counter, :counters.new(1, []))
     module = module_name(program)
     function_names = MapSet.new(program.functions, & &1.name)
 
@@ -117,6 +124,22 @@ defmodule Yup.Compiler.Erlang do
     {:fun, line, {:clauses, [{:clause, line, args, [], body(fn_body, function_names)}]}}
   end
 
+  defp expr(%Constructor{tag: tag, args: args} = node, function_names) do
+    elements = [{:atom, line(node), String.to_atom(tag)} | Enum.map(args, &expr(&1, function_names))]
+    {:tuple, line(node), elements}
+  end
+
+  defp expr(%Match{subject: subject, clauses: clauses} = node, function_names) do
+    subject_expr = expr(subject, function_names)
+    counter = shared_counter()
+    clause_forms = Enum.map(clauses, &lower_clause(&1, function_names, counter))
+
+    case clause_forms do
+      [] -> raise "internal compiler error: match has no clauses"
+      _ -> {:case, line(node), subject_expr, clause_forms}
+    end
+  end
+
   defp runtime_for("+"), do: :add
   defp runtime_for("-"), do: :subtract
   defp runtime_for("*"), do: :multiply
@@ -130,6 +153,88 @@ defmodule Yup.Compiler.Erlang do
   defp runtime_for("and"), do: :and_op
   defp runtime_for("or"), do: :or_op
   defp runtime_for(other), do: raise("unknown binary operator #{inspect(other)}")
+
+  defp lower_clause(%MatchClause{pattern: pattern, body: clause_body} = node, function_names, counter) do
+    {pattern_ast, mapping} = pattern_ast(pattern, %{}, counter)
+    renamed_body = rename_in_body(clause_body, mapping)
+    body_forms = body(renamed_body, function_names)
+    {:clause, line(node), [pattern_ast], [], body_forms}
+  end
+
+  defp pattern_ast(%LiteralPattern{literal: literal}, mapping, _counter) do
+    {expr(literal, MapSet.new()), mapping}
+  end
+
+  defp pattern_ast(%BinderPattern{name: name} = node, mapping, counter) do
+    fresh = fresh_name(name, counter)
+    {var(fresh, line(node)), Map.put(mapping, name, fresh)}
+  end
+
+  defp pattern_ast(%ConstructorPattern{tag: tag, args: args} = node, mapping, counter) do
+    {arg_asts, mapping} = Enum.map_reduce(args, mapping, &pattern_ast(&1, &2, counter))
+    elements = [{:atom, line(node), String.to_atom(tag)} | arg_asts]
+    {{:tuple, line(node), elements}, mapping}
+  end
+
+  defp fresh_name(name, counter) do
+    n = :counters.get(counter, 1)
+    :counters.add(counter, 1, 1)
+    "#{name}_#{n}"
+  end
+
+  defp shared_counter do
+    Process.get(:yup_fresh_counter) ||
+      raise("internal compiler error: fresh-name counter not initialized")
+  end
+
+  defp rename_in_body(body, mapping) do
+    Enum.map(body, fn node -> rename_in_node(node, mapping) end)
+  end
+
+  defp rename_in_node(%Identifier{name: name} = node, mapping) do
+    case Map.fetch(mapping, name) do
+      {:ok, fresh} -> %{node | name: fresh}
+      :error -> node
+    end
+  end
+
+  defp rename_in_node(%BinaryOp{left: left, right: right} = node, mapping) do
+    %{
+      node
+      | left: rename_in_node(left, mapping),
+        right: rename_in_node(right, mapping)
+    }
+  end
+
+  defp rename_in_node(%UnaryOp{operand: operand} = node, mapping) do
+    %{node | operand: rename_in_node(operand, mapping)}
+  end
+
+  defp rename_in_node(%Call{args: args} = node, mapping) do
+    %{node | args: Enum.map(args, &rename_in_node(&1, mapping))}
+  end
+
+  defp rename_in_node(%Constructor{args: args} = node, mapping) do
+    %{node | args: Enum.map(args, &rename_in_node(&1, mapping))}
+  end
+
+  defp rename_in_node(%Binding{value: value} = node, mapping) do
+    %{node | value: rename_in_node(value, mapping)}
+  end
+
+  defp rename_in_node(%Match{subject: subject, clauses: clauses} = node, mapping) do
+    %{
+      node
+      | subject: rename_in_node(subject, mapping),
+        clauses: Enum.map(clauses, &rename_in_clause(&1, mapping))
+    }
+  end
+
+  defp rename_in_node(node, _mapping), do: node
+
+  defp rename_in_clause(%MatchClause{pattern: _pattern, body: body} = clause, mapping) do
+    %{clause | body: rename_in_body(body, mapping)}
+  end
 
   defp remote_call(line, module, function, args) do
     {:call, line, {:remote, line, {:atom, line, module}, {:atom, line, function}}, args}
@@ -189,12 +294,27 @@ defmodule Yup.Compiler.Erlang do
 
         MapSet.put(seen, name)
 
+      %Match{clauses: clauses}, seen ->
+        Enum.each(clauses, fn %MatchClause{pattern: pattern, body: body} ->
+          updated = add_binder_names(seen, pattern)
+          validate_scope!(body, updated, path)
+        end)
+
+        seen
+
       _node, seen ->
         seen
     end)
 
     :ok
   end
+
+  defp add_binder_names(seen, %BinderPattern{name: name}), do: MapSet.put(seen, name)
+
+  defp add_binder_names(seen, %ConstructorPattern{args: args}),
+    do: Enum.reduce(args, seen, fn arg, acc -> add_binder_names(acc, arg) end)
+
+  defp add_binder_names(seen, _pattern), do: seen
 
   defp line(%{loc: %{line: line}}), do: line
   defp line(_node), do: 1

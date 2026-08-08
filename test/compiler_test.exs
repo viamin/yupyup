@@ -334,4 +334,172 @@ defmodule Yup.CompilerTest do
       Yup.Compiler.Erlang.lower(program)
     end
   end
+
+  test "executes match with literal integer patterns" do
+    source = """
+    match 42
+    when 0
+      puts "zero"
+    when 42
+      puts "the answer"
+    when 99
+      puts "ninety-nine"
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "match.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "the answer\n"
+  end
+
+  test "executes match with constructor patterns" do
+    source = """
+    result = Ok(42)
+
+    match result
+    when Ok(value)
+      puts "ok: " + value
+    when Error(reason)
+      puts "err: " + reason
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "match.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "ok: 42\n"
+  end
+
+  test "executes match with the second constructor clause" do
+    source = """
+    result = Error("nope")
+
+    match result
+    when Ok(value)
+      puts "ok: " + value
+    when Error(reason)
+      puts "err: " + reason
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "match.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "err: nope\n"
+  end
+
+  test "executes match with binder pattern falling through to the catch-all" do
+    source = """
+    answer = 7
+
+    match answer
+    when 0
+      puts "zero"
+    when 42
+      puts "the answer"
+    when n
+      puts "other: " + n
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "match.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "other: 7\n"
+  end
+
+  test "executes match with multiple statements in a clause body" do
+    source = """
+    match Ok(42)
+    when Ok(value)
+      label = "ok"
+      puts label + ":" + value
+    when other
+      puts "other"
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "match.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "ok:42\n"
+  end
+
+  test "executes match inside a function body" do
+    source = """
+    def unwrap(value)
+      match value
+      when Ok(inner)
+        inner
+      when Error(reason)
+        99
+      end
+    end
+
+    puts unwrap(Ok(10))
+    puts unwrap(Error("nope"))
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "fn_match.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "10\n99\n"
+  end
+
+  test "match raises when no clause matches" do
+    source = """
+    match 7
+    when 0
+      puts "zero"
+    when 42
+      puts "forty-two"
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "match.yup")
+
+    capture_io(fn ->
+      assert {:ok, module} = Yup.Compiler.compile(program)
+
+      result =
+        try do
+          Yup.Compiler.run(module)
+        catch
+          :error, {:case_clause, value} -> value
+        end
+
+      assert result == 7
+    end)
+  end
 end

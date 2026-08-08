@@ -4,11 +4,17 @@ defmodule Yup.ParserTest do
   alias Yup.AST.{
     AnonymousFunction,
     BinaryOp,
+    BinderPattern,
     Binding,
     Call,
+    Constructor,
+    ConstructorPattern,
     Function,
     Identifier,
     Literal,
+    LiteralPattern,
+    Match,
+    MatchClause,
     Program,
     UnaryOp
   }
@@ -234,5 +240,144 @@ defmodule Yup.ParserTest do
     assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("{ |x x| x }", path: "bad.yup")
 
     assert error.message == "expected , or | in block parameters"
+  end
+
+  test "parses match with literal integer and binder patterns" do
+    source = """
+    match value
+    when 0
+      puts "zero"
+    when n
+      puts n
+    end
+    """
+
+    assert {:ok, %Program{body: [%Match{subject: %Identifier{name: "value"}, clauses: clauses}]}} =
+             Yup.Parser.parse(source, path: "match.yup")
+
+    assert [
+             %MatchClause{
+               pattern: %LiteralPattern{literal: %Literal{kind: :integer, value: 0}},
+               body: [%Call{}]
+             },
+             %MatchClause{pattern: %BinderPattern{name: "n"}, body: [%Call{}]}
+           ] = clauses
+  end
+
+  test "parses match with constructor patterns into tagged tuples" do
+    source = """
+    match result
+    when Ok(value)
+      puts value
+    when Error(reason)
+      puts reason
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              body: [
+                %Match{
+                  clauses: [
+                    %MatchClause{
+                      pattern: %ConstructorPattern{
+                        tag: "Ok",
+                        args: [%BinderPattern{name: "value"}]
+                      }
+                    },
+                    %MatchClause{
+                      pattern: %ConstructorPattern{
+                        tag: "Error",
+                        args: [%BinderPattern{name: "reason"}]
+                      }
+                    }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "match.yup")
+  end
+
+  test "parses constructor expressions into tagged tuple form" do
+    assert {:ok,
+            %Program{
+              body: [
+                %Call{
+                  args: [%Constructor{tag: "Ok", args: [%Literal{kind: :integer, value: 42}]}]
+                }
+              ]
+            }} = Yup.Parser.parse("puts Ok(42)", path: "expr.yup")
+  end
+
+  test "parses literal patterns for strings, booleans, and nil" do
+    for {source, kind, value} <- [
+          {"when \"hi\"", :string, "hi"},
+          {"when true", :boolean, true},
+          {"when false", :boolean, false},
+          {"when nil", nil, nil}
+        ] do
+      full = "match x\n#{source}\n  puts x\nend\n"
+
+      assert {:ok,
+              %Program{
+                body: [
+                  %Match{clauses: [%MatchClause{pattern: %LiteralPattern{literal: literal}}]}
+                ]
+              }} = Yup.Parser.parse(full, path: "match.yup")
+
+      assert literal.kind == kind
+      assert literal.value == value
+    end
+  end
+
+  test "preserves source location on match clauses" do
+    source = """
+    match value
+    when 0
+      puts "zero"
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              body: [
+                %Match{
+                  loc: %{line: 1, column: 1},
+                  clauses: [%MatchClause{loc: %{line: 2, column: 1}}]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "match.yup")
+  end
+
+  test "reports missing end for match with source location" do
+    source = """
+    match value
+    when 0
+      puts "zero"
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "match.yup")
+    assert error.message =~ "missing end for match"
+  end
+
+  test "reports stray when at top level" do
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse("when 0\n  puts x\nend\n", path: "bad.yup")
+
+    assert error.line == 1
+    assert error.message =~ "stray when outside of match"
+  end
+
+  test "reports invalid pattern syntax" do
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse("match x\nwhen 42 99\n  puts x\nend\n", path: "bad.yup")
+
+    assert error.message =~ "unexpected trailing token"
+  end
+
+  test "reports missing pattern after when" do
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse("match x\nwhen \n  puts x\nend\n", path: "bad.yup")
+
+    assert error.message =~ "missing pattern after when"
   end
 end
