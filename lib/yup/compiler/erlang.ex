@@ -339,31 +339,47 @@ defmodule Yup.Compiler.Erlang do
         }
 
       {:ok, %{fields: declared_fields}} ->
-        provided = MapSet.new(Enum.map(fields, fn {n, _v, _l} -> n end))
+        result =
+          Enum.reduce_while(fields, MapSet.new(), fn {n, _v, loc}, seen ->
+            if MapSet.member?(seen, n),
+              do: {:halt, {:dup, n, loc}},
+              else: {:cont, MapSet.put(seen, n)}
+          end)
 
-        case MapSet.difference(provided, declared_fields) |> Enum.take(1) do
-          [unknown | _] ->
-            {_, _, field_loc} = Enum.find(fields, fn {n, _v, _l} -> n == unknown end)
-
+        case result do
+          {:dup, dup_name, dup_loc} ->
             raise %SourceError{
               path: path,
-              line: field_loc.line,
-              column: field_loc.column,
-              message: "record #{name} has no field #{unknown}"
+              line: dup_loc.line,
+              column: dup_loc.column,
+              message: "duplicate field #{dup_name} in record #{name} construction"
             }
 
-          [] ->
-            case MapSet.difference(declared_fields, provided) |> Enum.take(1) do
-              [missing | _] ->
+          provided ->
+            case MapSet.difference(provided, declared_fields) |> Enum.take(1) do
+              [unknown | _] ->
+                {_, _, field_loc} = Enum.find(fields, fn {n, _v, _l} -> n == unknown end)
+
                 raise %SourceError{
                   path: path,
-                  line: loc.line,
-                  column: loc.column,
-                  message: "record #{name} is missing field #{missing}"
+                  line: field_loc.line,
+                  column: field_loc.column,
+                  message: "record #{name} has no field #{unknown}"
                 }
 
               [] ->
-                :ok
+                case MapSet.difference(declared_fields, provided) |> Enum.take(1) do
+                  [missing | _] ->
+                    raise %SourceError{
+                      path: path,
+                      line: loc.line,
+                      column: loc.column,
+                      message: "record #{name} is missing field #{missing}"
+                    }
+
+                  [] ->
+                    :ok
+                end
             end
         end
     end

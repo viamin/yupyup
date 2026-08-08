@@ -527,6 +527,23 @@ defmodule Yup.CompilerTest do
     end
   end
 
+  test "rejects record construction with duplicate field" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    person = Person.new(name: "Ada", name: "Bob")
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    assert_raise Yup.SourceError, ~r/duplicate field name in record Person construction/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
   test "rejects undeclared record construction used as a match subject" do
     source = """
     match Person.new(name: "Ada", age: 42)
