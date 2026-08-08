@@ -806,4 +806,150 @@ defmodule Yup.CompilerTest do
       assert {:ok, :ok} = Yup.Compiler.run(module)
     end)
   end
+
+  test "annotated function parameter compiles and runs the same as an unannotated one" do
+    annotated = """
+    def greet(person: Person)
+      "Hello, " + person
+    end
+
+    puts greet("world")
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(annotated, path: "annotated.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "Hello, world\n"
+  end
+
+  test "annotated return type compiles and runs the same as an unannotated one" do
+    annotated = """
+    def hello(name) -> String
+      "Hello, " + name
+    end
+
+    puts hello("world")
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(annotated, path: "annotated.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "Hello, world\n"
+  end
+
+  test "annotated record fields compile and run identically to unannotated ones" do
+    annotated = """
+    record Person
+      name: String
+      age: Integer
+    end
+
+    person = Person.new(name: "Ada", age: 42)
+    puts person.name
+    puts person.age
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(annotated, path: "annotated.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "Ada\n42\n"
+  end
+
+  test "fully annotated record and function compile and run identically" do
+    source = """
+    record Person
+      name: String
+    end
+
+    def greet(person: Person) -> String
+      "Hello, " + person.name
+    end
+
+    puts greet(Person.new(name: "Ada"))
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "annotated.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "Hello, Ada\n"
+  end
+
+  test "ignoring annotations means a call with a wrong-shape value still compiles" do
+    # A future type checker will reject `greet(42)` because `Person` is the
+    # declared parameter type, but today the bootstrap ignores annotations so
+    # the program runs unchanged.
+    source = """
+    def greet(person: Person)
+      "Hello, " + person
+    end
+
+    puts greet(42)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "annotated.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output =~ "Hello,"
+  end
+
+  test "annotated and unannotated versions of the same program produce the same output" do
+    annotated = """
+    def add(a: Integer, b: Integer) -> Integer
+      a + b
+    end
+
+    puts add(3, 4)
+    """
+
+    unannotated = """
+    def add(a, b)
+      a + b
+    end
+
+    puts add(3, 4)
+    """
+
+    assert {:ok, annotated_program} = Yup.Parser.parse(annotated, path: "a.yup")
+    assert {:ok, unannotated_program} = Yup.Parser.parse(unannotated, path: "u.yup")
+
+    annotated_output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(annotated_program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    unannotated_output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(unannotated_program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert annotated_output == unannotated_output
+    assert annotated_output == "7\n"
+  end
 end

@@ -72,6 +72,8 @@ puts person.name
 
 The bootstrap supports a small slice: function definitions, function calls, immutable local bindings, integers, strings, booleans, `nil`, arithmetic/string operators (`+`, `-`, `*`, `/`), comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`), boolean operators (`and`, `or`, `not`), `puts`, anonymous functions/Ruby-shaped blocks (`{ |x| x * 2 }`) as first-class function values, constructor expressions (`Ok(42)`), `match` against literal, binder, and constructor patterns, and immutable record types with keyword construction and dot-call field access.
 
-It does not yet implement actors, types, formal verification, multiline `do ... end` blocks, collections, general method-call dot syntax, mutable record updates, record destructure patterns in `match`, short-circuit boolean operators in the BEAM backend, or string interpolation.
+Type annotations on function parameters, function returns, and record fields parse and survive in the AST, but the bootstrap deliberately does not enforce them — the structural type checker that will consume them is still future work.
+
+It does not yet implement actors, a full structural type checker, formal verification, multiline `do ... end` blocks, collections, general method-call dot syntax, mutable record updates, record destructure patterns in `match`, short-circuit boolean operators in the BEAM backend, or string interpolation.
 
 Read [docs/VISION.md](docs/VISION.md) for the larger experiment.

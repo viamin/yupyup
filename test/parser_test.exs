@@ -17,12 +17,15 @@ defmodule Yup.ParserTest do
     Match,
     MatchClause,
     Model,
+    Parameter,
     Program,
     Record,
     RecordConstruction,
+    RecordField,
     StateAccess,
     StateUpdate,
     TernaryOp,
+    TypeRef,
     UnaryOp
   }
 
@@ -396,8 +399,18 @@ defmodule Yup.ParserTest do
     end
     """
 
-    assert {:ok, %Program{records: [%Record{name: "Person", fields: ["name", "age"]}]}} =
-             Yup.Parser.parse(source, path: "record.yup")
+    assert {:ok,
+            %Program{
+              records: [
+                %Record{
+                  name: "Person",
+                  fields: [
+                    %RecordField{name: "name"},
+                    %RecordField{name: "age"}
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "record.yup")
   end
 
   test "parses record construction with keyword fields" do
@@ -412,7 +425,15 @@ defmodule Yup.ParserTest do
 
     assert {:ok,
             %Program{
-              records: [%Record{name: "Person", fields: ["name", "age"]}],
+              records: [
+                %Record{
+                  name: "Person",
+                  fields: [
+                    %RecordField{name: "name"},
+                    %RecordField{name: "age"}
+                  ]
+                }
+              ],
               body: [
                 %Binding{
                   name: "person",
@@ -720,5 +741,323 @@ defmodule Yup.ParserTest do
              Yup.Parser.parse(source, path: "model.yup")
 
     assert %Literal{kind: :atom, value: :"ok?!"} = state.value
+  end
+
+  # ── type annotations ──────────────────────────────────────────────
+
+  test "parses an annotated function parameter into the AST" do
+    source = """
+    def greet(person: Person)
+      person
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              functions: [
+                %Function{
+                  name: "greet",
+                  params: [
+                    %Parameter{
+                      name: "person",
+                      type: %TypeRef{name: "Person"},
+                      loc: %{line: 1, column: _}
+                    }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "annotated.yup")
+  end
+
+  test "parses an annotated function return type into the AST" do
+    source = """
+    def greet(person) -> String
+      person
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              functions: [
+                %Function{
+                  name: "greet",
+                  params: [%Parameter{name: "person", type: nil}],
+                  return_type: %TypeRef{name: "String", loc: %{line: 1, column: _}}
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "annotated.yup")
+  end
+
+  test "parses the annotated example from the type-annotation issue" do
+    source = """
+    def greet(person: Person) -> String
+      "Hello, " + person.name
+    end
+
+    record Person
+      name: String
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "annotated.yup")
+
+    assert [%Function{name: "greet", params: params, return_type: return_type, body: body}] =
+             program.functions
+
+    assert [%Parameter{name: "person", type: %TypeRef{name: "Person"}}] = params
+    assert %TypeRef{name: "String"} = return_type
+    assert [%BinaryOp{op: "+"}] = body
+
+    assert [%Record{fields: [%RecordField{name: "name", type: %TypeRef{name: "String"}}]}] =
+             program.records
+  end
+
+  test "preserves unannotated parameters when other parameters are annotated" do
+    source = """
+    def mixed(a: A, b)
+      a + b
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              functions: [
+                %Function{
+                  params: [
+                    %Parameter{name: "a", type: %TypeRef{name: "A"}},
+                    %Parameter{name: "b", type: nil}
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "annotated.yup")
+  end
+
+  test "preserves unannotated record fields when other fields are annotated" do
+    source = """
+    record Person
+      name: String
+      age
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              records: [
+                %Record{
+                  fields: [
+                    %RecordField{name: "name", type: %TypeRef{name: "String"}},
+                    %RecordField{name: "age", type: nil}
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "annotated.yup")
+  end
+
+  test "parses an unannotated function exactly as before" do
+    source = """
+    def hello(name)
+      "Hello, " + name
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              functions: [
+                %Function{
+                  name: "hello",
+                  params: [%Parameter{name: "name", type: nil, loc: %{line: 1, column: _}}],
+                  return_type: nil,
+                  body: [%BinaryOp{}]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "untyped.yup")
+  end
+
+  test "parses an unannotated record exactly as before" do
+    source = """
+    record Person
+      name
+      age
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              records: [
+                %Record{
+                  fields: [
+                    %RecordField{name: "name", type: nil},
+                    %RecordField{name: "age", type: nil}
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "untyped.yup")
+  end
+
+  test "preserves source locations on parameter type annotations" do
+    source = """
+    def greet(person: Person)
+      person
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              functions: [
+                %Function{
+                  params: [
+                    %Parameter{
+                      name: "person",
+                      type: %TypeRef{name: "Person", loc: %{line: 1, column: column}}
+                    }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "annotated.yup")
+
+    assert column == 19
+  end
+
+  test "preserves source locations on record field type annotations" do
+    source = """
+    record Person
+      name: String
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              records: [
+                %Record{
+                  fields: [
+                    %RecordField{
+                      name: "name",
+                      loc: %{line: 2, column: field_column},
+                      type: %TypeRef{name: "String", loc: %{line: 2, column: type_column}}
+                    }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "annotated.yup")
+
+    assert field_column == 3
+    assert type_column == 9
+  end
+
+  test "preserves correct column when parameter name matches a substring in def keyword" do
+    # Regression: column_in searched the full "def" line, so for
+    # "def d(d: D)" the "d" in the name matched inside "def" first.
+    source = """
+    def d(d: D)
+      d
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              functions: [
+                %Function{
+                  name: "d",
+                  params: [
+                    %Parameter{
+                      name: "d",
+                      type: %TypeRef{name: "D", loc: %{line: 1, column: type_col}},
+                      loc: %{line: 1, column: name_col}
+                    }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "substring.yup")
+
+    # "def d(d: D)"
+    #  1234567890...
+    #  d at column 7, D at column 10
+    assert name_col == 7
+    assert type_col == 10
+  end
+
+  test "preserves correct type column when params share the same type name" do
+    # Regression: type_ref_for searched the full source for the type name,
+    # so both params with the same type pointed at the first occurrence.
+    source = """
+    def f(a: A, b: A)
+      a + b
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              functions: [
+                %Function{
+                  name: "f",
+                  params: [
+                    %Parameter{
+                      name: "a",
+                      type: %TypeRef{name: "A", loc: %{line: 1, column: first_type_col}},
+                      loc: %{line: 1, column: first_name_col}
+                    },
+                    %Parameter{
+                      name: "b",
+                      type: %TypeRef{name: "A", loc: %{line: 1, column: second_type_col}},
+                      loc: %{line: 1, column: second_name_col}
+                    }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "shared_type.yup")
+
+    # "def f(a: A, b: A)"
+    #  123456789...
+    #  a at column 7, A at column 10 (first)
+    #  b at column 13, A at column 16 (second)
+    assert first_name_col == 7
+    assert first_type_col == 10
+    assert second_name_col == 13
+    assert second_type_col == 16
+  end
+
+  test "preserves source locations on deeply indented record field type annotations" do
+    source = "record Person\n        name: String\n      end\n"
+
+    assert {:ok,
+            %Program{
+              records: [
+                %Record{
+                  fields: [
+                    %RecordField{
+                      name: "name",
+                      loc: %{line: 2, column: field_column},
+                      type: %TypeRef{name: "String", loc: %{line: 2, column: type_column}}
+                    }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "annotated.yup")
+
+    assert field_column == 9
+    assert type_column == 15
+  end
+
+  test "preserves source locations on unannotated indented record fields" do
+    source = "record Person\n    name\n    age\n  end\n"
+
+    assert {:ok,
+            %Program{
+              records: [
+                %Record{
+                  fields: [
+                    %RecordField{name: "name", loc: %{line: 2, column: 5}},
+                    %RecordField{name: "age", loc: %{line: 3, column: 5}}
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "annotated.yup")
+  end
+
+  test "rejects an annotation whose type name is not an uppercase identifier" do
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse("def f(x: string)\n  x\nend\n", path: "bad.yup")
+
+    assert error.message =~ "invalid parameter"
   end
 end

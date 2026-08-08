@@ -62,7 +62,7 @@ defmodule Yup.Compiler.Erlang do
 
   defp lower_function(%Function{} = function, function_names) do
     line = line(function)
-    args = Enum.map(function.params, &var(&1, line))
+    args = Enum.map(function.params, &var(&1.name, line))
 
     {:function, line, String.to_atom(function.name), length(function.params),
      [{:clause, line, args, [], body(function.body, function_names)}]}
@@ -323,7 +323,7 @@ defmodule Yup.Compiler.Erlang do
     validate_scope!(program.body, reserved, program.source_path)
 
     Enum.each(program.functions, fn function ->
-      bound = reserved |> MapSet.union(MapSet.new(function.params))
+      bound = reserved |> MapSet.union(MapSet.new(function.params, & &1.name))
       validate_scope!(function.body, bound, program.source_path)
     end)
   end
@@ -339,7 +339,7 @@ defmodule Yup.Compiler.Erlang do
 
   defp record_declarations(records) do
     Map.new(records, fn %Record{name: name, fields: fields, loc: loc} ->
-      {name, %{fields: MapSet.new(fields), loc: loc}}
+      {name, %{fields: MapSet.new(fields, & &1.name), loc: loc}}
     end)
   end
 
