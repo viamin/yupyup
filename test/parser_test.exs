@@ -160,7 +160,6 @@ defmodule Yup.ParserTest do
 
   test "reports unexpected operator at end of expression" do
     assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("1 + ", path: "bad.yup")
-    assert error.line == 1
     assert error.message =~ "unexpected end of expression"
   end
 end

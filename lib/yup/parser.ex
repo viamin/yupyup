@@ -219,19 +219,19 @@ defmodule Yup.Parser do
   end
 
   defp parse_primary(
-         [%{type: :identifier, value: name, line: line, column: column}, %{type: :lparen} | rest],
-         path
-       ) do
-    {args, remaining} = parse_call_args(rest, path, [])
-    {%Call{name: name, args: args, loc: loc(line, column)}, remaining}
-  end
-
-  defp parse_primary(
          [%{type: :identifier, value: "puts", line: line, column: column} | rest],
          path
        ) do
     {arg, remaining} = parse_or(rest, path)
     {%Call{name: "puts", args: [arg], loc: loc(line, column)}, remaining}
+  end
+
+  defp parse_primary(
+         [%{type: :identifier, value: name, line: line, column: column}, %{type: :lparen} | rest],
+         path
+       ) do
+    {args, remaining} = parse_call_args(rest, path, [])
+    {%Call{name: name, args: args, loc: loc(line, column)}, remaining}
   end
 
   defp parse_primary(

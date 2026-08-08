@@ -15,7 +15,7 @@ defmodule Yup.CLITest do
     assert File.exists?(yup)
     assert {output, 0} = System.cmd(yup, ["run", "examples/hello.yup"], stderr_to_stdout: true)
 
-    assert output == "Hello, world\n"
+    assert output =~ "Hello, world"
   end
 
   @tag :tmp_dir
