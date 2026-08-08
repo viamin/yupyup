@@ -286,7 +286,9 @@ defmodule Yup.Compiler.Erlang do
     Enum.each(nodes, fn node -> check_node(node, declarations, path) end)
   end
 
-  defp check_node(%Match{clauses: clauses}, declarations, path) do
+  defp check_node(%Match{subject: subject, clauses: clauses}, declarations, path) do
+    check_node(subject, declarations, path)
+
     Enum.each(clauses, fn %MatchClause{body: body} ->
       check_nodes(body, declarations, path)
     end)

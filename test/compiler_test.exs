@@ -527,6 +527,84 @@ defmodule Yup.CompilerTest do
     end
   end
 
+  test "rejects undeclared record construction used as a match subject" do
+    source = """
+    match Person.new(name: "Ada", age: 42)
+    when _
+      puts "any"
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    assert_raise Yup.SourceError, ~r/unknown record type Person/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects unknown field in record construction used as a match subject" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    match Person.new(name: "Ada", age: 42, weight: 70)
+    when _
+      puts "any"
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    assert_raise Yup.SourceError, ~r/record Person has no field weight/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects missing field in record construction used as a match subject" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    match Person.new(name: "Ada")
+    when _
+      puts "any"
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    assert_raise Yup.SourceError, ~r/record Person is missing field age/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "valid record construction as a match subject compiles and runs" do
+    source = """
+    record Person
+      name
+    end
+
+    match Person.new(name: "Ada")
+    when _
+      puts "any"
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "record.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "any\n"
+  end
+
   test "field access raises at runtime for missing keys" do
     source = """
     record Person
