@@ -168,13 +168,35 @@ defmodule Yup.Parser do
     end
   end
 
+  # Computes 1-based column offsets so each parsed Parameter and TypeRef
+  # carries the correct source location even when the parameter name or
+  # type name appears earlier in the function signature (e.g. the "d" in
+  # "def f(d: D)" matching inside "def", or duplicate type names in
+  # "def f(a: A, b: A)").
   defp parse_params(params_text, line, source, path) do
-    params_text
-    |> split_args()
-    |> Enum.map(&parse_param(&1, line, source, path))
+    # column_in/2 returns 1-based column; "(" is at paren_col, so the
+    # first character of params_text is at paren_col + 1.
+    paren_col = column_in(source, "(")
+    args = split_args(params_text)
+
+    {params, _last_search} =
+      Enum.map_reduce(args, 0, fn arg, search_from ->
+        scope = {search_from, byte_size(params_text) - search_from}
+
+        case :binary.match(params_text, arg, [{:scope, scope}]) do
+          {arg_pos, _} ->
+            base_col = paren_col + 1 + arg_pos
+            {parse_param(arg, line, base_col, path), arg_pos + byte_size(arg)}
+
+          :nomatch ->
+            {parse_param(arg, line, paren_col + 1, path), search_from}
+        end
+      end)
+
+    params
   end
 
-  defp parse_param(text, line, source, path) do
+  defp parse_param(text, line, base_col, path) do
     trimmed = String.trim(text)
 
     case Regex.run(
@@ -182,11 +204,21 @@ defmodule Yup.Parser do
            trimmed
          ) do
       [_, name, type_name] ->
-        type = type_ref_for(type_name, source, :colon, line, path)
-        %Parameter{name: name, type: type, loc: loc(line, column_in(source, name))}
+        name_col = base_col + column_in(text, name) - 1
+
+        type =
+          case :binary.match(text, type_name) do
+            {type_pos, _} ->
+              %TypeRef{name: type_name, loc: loc(line, base_col + type_pos)}
+
+            :nomatch ->
+              %TypeRef{name: type_name, loc: loc(line, 1)}
+          end
+
+        %Parameter{name: name, type: type, loc: loc(line, name_col)}
 
       [_, name] ->
-        %Parameter{name: name, loc: loc(line, column_in(source, name))}
+        %Parameter{name: name, loc: loc(line, base_col + column_in(text, name) - 1)}
 
       nil ->
         raise source_error(path, line, 1, "invalid parameter #{inspect(text)}")

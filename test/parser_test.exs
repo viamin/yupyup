@@ -944,6 +944,78 @@ defmodule Yup.ParserTest do
     assert type_column == 9
   end
 
+  test "preserves correct column when parameter name matches a substring in def keyword" do
+    # Regression: column_in searched the full "def" line, so for
+    # "def d(d: D)" the "d" in the name matched inside "def" first.
+    source = """
+    def d(d: D)
+      d
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              functions: [
+                %Function{
+                  name: "d",
+                  params: [
+                    %Parameter{
+                      name: "d",
+                      type: %TypeRef{name: "D", loc: %{line: 1, column: type_col}},
+                      loc: %{line: 1, column: name_col}
+                    }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "substring.yup")
+
+    # "def d(d: D)"
+    #  1234567890...
+    #  d at column 7, D at column 10
+    assert name_col == 7
+    assert type_col == 10
+  end
+
+  test "preserves correct type column when params share the same type name" do
+    # Regression: type_ref_for searched the full source for the type name,
+    # so both params with the same type pointed at the first occurrence.
+    source = """
+    def f(a: A, b: A)
+      a + b
+    end
+    """
+
+    assert {:ok,
+            %Program{
+              functions: [
+                %Function{
+                  name: "f",
+                  params: [
+                    %Parameter{
+                      name: "a",
+                      type: %TypeRef{name: "A", loc: %{line: 1, column: first_type_col}},
+                      loc: %{line: 1, column: first_name_col}
+                    },
+                    %Parameter{
+                      name: "b",
+                      type: %TypeRef{name: "A", loc: %{line: 1, column: second_type_col}},
+                      loc: %{line: 1, column: second_name_col}
+                    }
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "shared_type.yup")
+
+    # "def f(a: A, b: A)"
+    #  123456789...
+    #  a at column 7, A at column 10 (first)
+    #  b at column 13, A at column 16 (second)
+    assert first_name_col == 7
+    assert first_type_col == 10
+    assert second_name_col == 13
+    assert second_type_col == 16
+  end
+
   test "preserves source locations on deeply indented record field type annotations" do
     source = "record Person\n        name: String\n      end\n"
 
