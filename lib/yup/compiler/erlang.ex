@@ -14,8 +14,10 @@ defmodule Yup.Compiler.Erlang do
     FieldAccess,
     Function,
     Identifier,
+    ListLiteral,
     Literal,
     LiteralPattern,
+    MapLiteral,
     Match,
     MatchClause,
     Program,
@@ -31,6 +33,21 @@ defmodule Yup.Compiler.Erlang do
   # would otherwise be silently shadowed by the dispatch clause above.
   @reserved_names MapSet.new(["puts"])
 
+  # Builtin immutable collection operations, resolved only when the program
+  # does not define a top-level `def` with the same name (user definitions
+  # shadow the builtins). `:block` operations take (collection, fun), `:reduce`
+  # takes (collection, fun) or (collection, initial, fun), and `:unary`
+  # operations take just the collection.
+  @collection_ops %{
+    "map" => :block,
+    "select" => :block,
+    "each" => :block,
+    "reduce" => :reduce,
+    "length" => :unary,
+    "keys" => :unary,
+    "values" => :unary
+  }
+
   def module_name(%Program{} = program) do
     key = program.source_path || :erlang.term_to_binary(program)
 
@@ -45,6 +62,7 @@ defmodule Yup.Compiler.Erlang do
     validate_record_constructions!(program)
 
     Process.put(:yup_fresh_counter, :counters.new(1, []))
+    Process.put(:yup_source_path, program.source_path)
     module = module_name(program)
     function_names = MapSet.new(program.functions, & &1.name)
 
@@ -93,19 +111,94 @@ defmodule Yup.Compiler.Erlang do
      [{:bin_element, line, {:string, line, String.to_charlist(value)}, :default, :default}]}
   end
 
+  defp expr(%ListLiteral{elements: elements} = node, function_names) do
+    line = line(node)
+
+    Enum.reverse(elements)
+    |> Enum.map(&expr(&1, function_names))
+    |> Enum.reduce({:nil, line}, &{:cons, line, &1, &2})
+  end
+
+  defp expr(%MapLiteral{entries: entries} = node, function_names) do
+    line = line(node)
+
+    field_asts =
+      Enum.map(entries, fn {key, value, _entry_loc} ->
+        {:map_field_assoc, line, {:atom, line, String.to_atom(key)}, expr(value, function_names)}
+      end)
+
+    {:map, line, field_asts}
+  end
+
   defp expr(%Identifier{name: name} = node, _function_names), do: var(name, line(node))
 
   defp expr(%Binding{name: name, value: value} = node, function_names),
     do: {:match, line(node), var(name, line(node)), expr(value, function_names)}
 
-  defp expr(%Call{name: name, args: args, receiver: receiver} = node, function_names) do
+  defp expr(%Call{name: name, args: args, receiver: receiver, block: block} = node, function_names) do
     line = line(node)
-    call_args = call_args(receiver, args, function_names)
+    # A trailing brace block is an ordinary function value passed as the
+    # last argument, so `values.map { |v| v * 2 }` and
+    # `map(values, { |v| v * 2 })` lower identically.
+    arg_nodes = args ++ List.wrap(block)
+    call_args = call_args(receiver, arg_nodes, function_names)
 
-    case {name, call_args} do
-      {"puts", [arg]} -> remote_call(line, :"Elixir.Yup.Runtime", :puts, [arg])
-      _ -> dispatch_call(name, call_args, line, function_names)
+    cond do
+      MapSet.member?(function_names, name) ->
+        {:call, line, {:atom, line, String.to_atom(name)}, call_args}
+
+      name == "puts" ->
+        case call_args do
+          [arg] ->
+            remote_call(line, :"Elixir.Yup.Runtime", :puts, [arg])
+
+          _ ->
+            raise_source_error(node, "puts takes exactly one argument")
+        end
+
+      Map.has_key?(@collection_ops, name) ->
+        validate_collection_call!(name, receiver, arg_nodes, node)
+        remote_call(line, :"Elixir.Yup.Runtime", String.to_atom(name), call_args)
+
+      true ->
+        dispatch_call(name, call_args, line, function_names)
     end
+  end
+
+  defp validate_collection_call!(name, receiver, arg_nodes, node) do
+    total = length(arg_nodes) + if receiver, do: 1, else: 0
+    block? = match?(%AnonymousFunction{}, List.last(arg_nodes))
+
+    case @collection_ops[name] do
+      :block ->
+        unless total == 2 and block?,
+          do:
+            raise_source_error(
+              node,
+              "#{name} requires a block like values.#{name} { |value| value * 2 }"
+            )
+
+      :reduce ->
+        unless total in 2..3 and block?,
+          do:
+            raise_source_error(
+              node,
+              "#{name} requires a block like values.#{name}(0) { |sum, value| sum + value }"
+            )
+
+      :unary ->
+        unless total == 1,
+          do: raise_source_error(node, "#{name} takes the collection as its only argument")
+    end
+  end
+
+  defp raise_source_error(node, message) do
+    raise %SourceError{
+      path: Process.get(:yup_source_path),
+      line: line(node),
+      column: column(node),
+      message: message
+    }
   end
 
   defp expr(%BinaryOp{op: op, left: left, right: right} = node, function_names) do
@@ -255,12 +348,26 @@ defmodule Yup.Compiler.Erlang do
     %{node | operand: rename_in_node(operand, mapping)}
   end
 
-  defp rename_in_node(%Call{args: args, receiver: receiver} = node, mapping) do
+  defp rename_in_node(%Call{args: args, receiver: receiver, block: block} = node, mapping) do
     %{
       node
       | args: Enum.map(args, &rename_in_node(&1, mapping)),
-        receiver: receiver && rename_in_node(receiver, mapping)
+        receiver: receiver && rename_in_node(receiver, mapping),
+        block: block && rename_in_node(block, mapping)
     }
+  end
+
+  defp rename_in_node(%ListLiteral{elements: elements} = node, mapping) do
+    %{node | elements: Enum.map(elements, &rename_in_node(&1, mapping))}
+  end
+
+  defp rename_in_node(%MapLiteral{entries: entries} = node, mapping) do
+    renamed =
+      Enum.map(entries, fn {key, value, entry_loc} ->
+        {key, rename_in_node(value, mapping), entry_loc}
+      end)
+
+    %{node | entries: renamed}
   end
 
   defp rename_in_node(%Constructor{args: args} = node, mapping) do
@@ -384,9 +491,18 @@ defmodule Yup.Compiler.Erlang do
   defp check_node(%UnaryOp{operand: operand}, declarations, path),
     do: check_node(operand, declarations, path)
 
-  defp check_node(%Call{args: args, receiver: receiver}, declarations, path) do
+  defp check_node(%Call{args: args, receiver: receiver, block: block}, declarations, path) do
     if receiver, do: check_node(receiver, declarations, path)
+    if block, do: check_node(block, declarations, path)
     Enum.each(args, fn arg -> check_node(arg, declarations, path) end)
+  end
+
+  defp check_node(%ListLiteral{elements: elements}, declarations, path) do
+    Enum.each(elements, fn element -> check_node(element, declarations, path) end)
+  end
+
+  defp check_node(%MapLiteral{entries: entries}, declarations, path) do
+    Enum.each(entries, fn {_key, value, _loc} -> check_node(value, declarations, path) end)
   end
 
   defp check_node(%Constructor{args: args}, declarations, path) do
