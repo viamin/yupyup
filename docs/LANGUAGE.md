@@ -301,8 +301,14 @@ has a receiver.
 treating a list of integers as an Erlang charlist. Strings nested inside a
 printed list or map are quoted (`["a", "b"]`) so they are distinguishable
 from other element kinds; a top-level `puts "a"` is unaffected and still
-prints the bare string. Map keys print in sorted order since BEAM maps do
-not preserve insertion order.
+prints the bare string. `nil` prints as `nil`, both at the top level and
+inside a collection, so `puts [nil]` prints `[nil]` rather than looking like
+an empty list. Constructor values print in their source shape, so
+`puts Ok(1)` prints `Ok(1)` and `puts [Error("nope")]` prints
+`[Error("nope")]`; constructor payloads follow the same nested rules, so
+string payloads stay quoted. Function values print in an opaque inspected
+form (`#Function<...>`) rather than crashing. Map keys print in sorted order
+since BEAM maps do not preserve insertion order.
 
 Calling `map` or `select` on a value that is not a list is a runtime error.
 Calling any other collection-shaped operation name (for example `reduce`,

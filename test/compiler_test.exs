@@ -1116,6 +1116,75 @@ defmodule Yup.CompilerTest do
     assert output == ~s(["a", "b"]\n)
   end
 
+  test "prints nil list elements distinctly from an empty list" do
+    assert {:ok, program} = Yup.Parser.parse("puts [nil, false]", path: "list.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[nil, false]\n"
+  end
+
+  test "prints nil map values distinctly from an absent value" do
+    assert {:ok, program} = Yup.Parser.parse("puts { a: nil }", path: "map.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "{a: nil}\n"
+  end
+
+  test "prints a top-level constructor value in source shape" do
+    assert {:ok, program} = Yup.Parser.parse("puts Ok(1)", path: "ctor.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "Ok(1)\n"
+  end
+
+  test "prints constructor values nested in a list with quoted string payloads" do
+    source = """
+    puts [Ok(1), Error("nope")]
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "ctor.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == ~s{[Ok(1), Error("nope")]\n}
+  end
+
+  test "prints a function value in opaque form instead of crashing" do
+    source = """
+    double = { |x| x * 2 }
+    puts double
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "fn.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output =~ "#Function<"
+  end
+
   test "executes a map literal and reads fields via dot syntax" do
     source = """
     user = { name: "Ada", active: true }

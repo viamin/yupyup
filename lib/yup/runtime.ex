@@ -35,6 +35,8 @@ defmodule Yup.Runtime do
   # of integers is otherwise indistinguishable from an Erlang charlist. Map
   # keys are sorted for deterministic output since BEAM map iteration order
   # is not insertion order.
+  defp display(nil), do: "nil"
+
   defp display(value) when is_list(value) do
     "[" <> Enum.map_join(value, ", ", &nested_display/1) <> "]"
   end
@@ -48,6 +50,18 @@ defmodule Yup.Runtime do
 
     "{" <> fields <> "}"
   end
+
+  # Constructor values are tagged tuples and String.Chars has no tuple
+  # implementation, so they print in their YupYup source shape, `Ok(1)`.
+  # Payloads use the nested rules so strings inside stay quoted.
+  defp display(value) when is_tuple(value) do
+    [tag | args] = Tuple.to_list(value)
+    Atom.to_string(tag) <> "(" <> Enum.map_join(args, ", ", &nested_display/1) <> ")"
+  end
+
+  # Function values have no String.Chars implementation either; print their
+  # opaque inspect form rather than crashing.
+  defp display(value) when is_function(value), do: inspect(value)
 
   defp display(value), do: to_string(value)
 
