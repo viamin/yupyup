@@ -33,6 +33,7 @@ This creates an executable named `yup` in the project root.
 ./yup run examples/match.yup
 ./yup run examples/records.yup
 ./yup run examples/dot_calls.yup
+./yup run examples/collections.yup
 ```
 
 Expected output:
@@ -69,12 +70,24 @@ person = Person.new(name: "Ada", age: 42)
 puts person.name
 ```
 
+Lists and maps are immutable collections; `map` and `select` are block-driven
+list operations that always return a new list:
+
+```yup
+values = [1, 2, 3]
+doubled = values.map { |value| value * 2 }
+puts doubled
+
+user = { name: "Ada", active: true }
+puts user.name
+```
+
 ## Current Capability
 
-The bootstrap supports a small slice: function definitions, function calls, immutable local bindings, integers, strings, booleans, `nil`, arithmetic/string operators (`+`, `-`, `*`, `/`), comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`), boolean operators (`and`, `or`, `not`), `puts`, anonymous functions/Ruby-shaped blocks (`{ |x| x * 2 }`) as first-class function values, constructor expressions (`Ok(42)`), `match` against literal, binder, and constructor patterns, immutable record types with keyword construction and dot-call field access, and dot calls with full postfix chaining for ordinary immutable values (`value.operation(arg)`).
+The bootstrap supports a small slice: function definitions, function calls, immutable local bindings, integers, strings, booleans, `nil`, arithmetic/string operators (`+`, `-`, `*`, `/`), comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`), boolean operators (`and`, `or`, `not`), `puts`, anonymous functions/Ruby-shaped blocks (`{ |x| x * 2 }`) as first-class function values, constructor expressions (`Ok(42)`), `match` against literal, binder, and constructor patterns, immutable record types with keyword construction and dot-call field access, dot calls with full postfix chaining for ordinary immutable values (`value.operation(arg)`), and immutable list/map literals with block-driven `map`/`select` list operations.
 
 Type annotations on function parameters, function returns, and record fields parse and survive in the AST, but the bootstrap deliberately does not enforce them — the structural type checker that will consume them is still future work.
 
-It does not yet implement actors (including actor dot-call dispatch), a full structural type checker, formal verification, multiline `do ... end` blocks, collections, mutable record updates, record destructure patterns in `match`, short-circuit boolean operators in the BEAM backend, or string interpolation.
+It does not yet implement actors (including actor dot-call dispatch), a full structural type checker, formal verification, multiline `do ... end` blocks, a Set type, list indexing or list/map patterns in `match`, mutable record updates, record destructure patterns in `match`, short-circuit boolean operators in the BEAM backend, or string interpolation.
 
 Read [docs/VISION.md](docs/VISION.md) for the larger experiment.

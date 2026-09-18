@@ -12,8 +12,10 @@ defmodule Yup.ParserTest do
     FieldAccess,
     Function,
     Identifier,
+    ListLiteral,
     Literal,
     LiteralPattern,
+    MapLiteral,
     Match,
     MatchClause,
     Model,
@@ -243,6 +245,13 @@ defmodule Yup.ParserTest do
 
   test "reports a missing pipe to start block parameters" do
     assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("{ x * 2 }", path: "bad.yup")
+    assert error.message == "expected | or a field name after {"
+  end
+
+  test "reports a missing pipe to start a trailing block's parameters" do
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse("values.map { x * 2 }", path: "bad.yup")
+
     assert error.message == "expected | to start block parameters"
   end
 
@@ -1241,5 +1250,183 @@ defmodule Yup.ParserTest do
              Yup.Parser.parse("def f(x: string)\n  x\nend\n", path: "bad.yup")
 
     assert error.message =~ "invalid parameter"
+  end
+
+  # ── immutable collections (issue #4) ────────────────────────────────
+
+  test "parses an empty list literal" do
+    assert {:ok, %Program{body: [%ListLiteral{elements: []}]}} =
+             Yup.Parser.parse("[]", path: "list.yup")
+  end
+
+  test "parses a list literal with elements" do
+    assert {:ok,
+            %Program{
+              body: [
+                %ListLiteral{
+                  elements: [
+                    %Literal{kind: :integer, value: 1},
+                    %Literal{kind: :integer, value: 2},
+                    %Literal{kind: :integer, value: 3}
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse("[1, 2, 3]", path: "list.yup")
+  end
+
+  test "parses a nested list literal" do
+    assert {:ok,
+            %Program{
+              body: [
+                %ListLiteral{
+                  elements: [
+                    %Literal{kind: :integer, value: 1},
+                    %ListLiteral{elements: [%Literal{kind: :integer, value: 2}]}
+                  ]
+                }
+              ]
+            }} = Yup.Parser.parse("[1, [2]]", path: "list.yup")
+  end
+
+  test "preserves source location on a list literal" do
+    assert {:ok, %Program{body: [%Call{args: [%ListLiteral{loc: loc}]}]}} =
+             Yup.Parser.parse("puts [1, 2]", path: "list.yup")
+
+    assert loc == %{line: 1, column: 6}
+  end
+
+  test "reports a missing closing bracket for a malformed list literal" do
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("[1, 2", path: "list.yup")
+
+    assert error.message =~ "expected ] in list literal"
+  end
+
+  test "reports an invalid separator inside a list literal" do
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("[1 2]", path: "list.yup")
+
+    assert error.message =~ "expected , or ] in list literal"
+  end
+
+  test "parses an empty map literal" do
+    assert {:ok, %Program{body: [%MapLiteral{fields: []}]}} =
+             Yup.Parser.parse("{}", path: "map.yup")
+  end
+
+  test "parses a map literal with keyword fields" do
+    assert {:ok,
+            %Program{
+              body: [
+                %Binding{
+                  name: "user",
+                  value: %MapLiteral{
+                    fields: [
+                      {"name", %Literal{kind: :string, value: "Ada"}, _},
+                      {"active", %Literal{kind: :boolean, value: true}, _}
+                    ]
+                  }
+                }
+              ]
+            }} = Yup.Parser.parse(~s(user = { name: "Ada", active: true }), path: "map.yup")
+  end
+
+  test "preserves source location on a map literal" do
+    assert {:ok, %Program{body: [%Call{args: [%MapLiteral{loc: loc}]}]}} =
+             Yup.Parser.parse(~s(puts { name: "Ada" }), path: "map.yup")
+
+    assert loc == %{line: 1, column: 6}
+  end
+
+  test "reports invalid content inside a map literal" do
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("{ 1, 2 }", path: "map.yup")
+
+    assert error.message =~ "expected | or a field name after {"
+  end
+
+  test "reports a missing closing brace for a malformed map literal" do
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse(~s({ name: "Ada"), path: "map.yup")
+
+    assert error.message =~ "expected } in map literal"
+  end
+
+  test "field access on a map literal value uses ordinary dot syntax" do
+    source = """
+    user = { name: "Ada" }
+    puts user.name
+    """
+
+    assert {:ok,
+            %Program{
+              body: [
+                %Binding{},
+                %Call{
+                  args: [%FieldAccess{record: %Identifier{name: "user"}, field: "name"}]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "map.yup")
+  end
+
+  test "parses a dot call with a trailing block argument as a collection operation" do
+    source = "values.map { |value| value * 2 }"
+
+    assert {:ok,
+            %Program{
+              body: [
+                %Call{
+                  name: "map",
+                  receiver: %Identifier{name: "values"},
+                  args: [%AnonymousFunction{params: ["value"]}]
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "collections.yup")
+  end
+
+  test "a dot call with a trailing block chains with further dot calls" do
+    source = "values.map { |value| value * 2 }.map { |value| value + 1 }"
+
+    assert {:ok,
+            %Program{
+              body: [
+                %Call{
+                  name: "map",
+                  args: [%AnonymousFunction{params: ["value"]}],
+                  receiver: %Call{
+                    name: "map",
+                    args: [%AnonymousFunction{params: ["value"]}],
+                    receiver: %Identifier{name: "values"}
+                  }
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "collections.yup")
+  end
+
+  test "rejects a list literal containing a dot call in a model expression" do
+    source = """
+    model Light
+
+      transition toggle do
+        state.value = [state.value()]
+      end
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+
+    assert error.message =~ "dot calls are not supported in model expressions"
+  end
+
+  test "rejects a map literal containing a dot call in a model expression" do
+    source = """
+    model Light
+
+      transition toggle do
+        state.value = { value: state.value() }
+      end
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+
+    assert error.message =~ "dot calls are not supported in model expressions"
   end
 end
