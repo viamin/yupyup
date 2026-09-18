@@ -296,9 +296,11 @@ This means a top-level `def map(...)` makes every call to `map(...)` resolve
 to that definition instead of the builtin. But binding a local name that
 merely happens to share a builtin's name — e.g. `map = { |acc, x| acc + x }`
 — does not shadow the builtin for a plain call: `map(0, 5)` still resolves to
-the builtin (and fails its arity check, since `map` expects a collection and
-a function). Ordinary data bindings like `values = [1, 2, 3]` are unaffected
-by this precedence, since `values` is never called as a function there — the
+the builtin. That call passes the compile-time arity check (two arguments)
+and instead raises a raw `FunctionClauseError` at runtime, since `0` is not
+a list; an arity-1 call like `map(0)` is what fails the compile-time check.
+Ordinary data bindings like `values = [1, 2, 3]` are unaffected by this
+precedence, since `values` is never called as a function there — the
 conflict only matters for a name that is both a builtin and is called
 plain-call-style (`name(...)`) rather than read as a value or used as a dot
 call receiver.
