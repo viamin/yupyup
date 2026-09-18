@@ -14,8 +14,10 @@ defmodule Yup.Compiler.Erlang do
     FieldAccess,
     Function,
     Identifier,
+    ListLiteral,
     Literal,
     LiteralPattern,
+    MapLiteral,
     Match,
     MatchClause,
     Program,
@@ -26,10 +28,11 @@ defmodule Yup.Compiler.Erlang do
 
   alias Yup.SourceError
 
-  # Names whose binding is reserved by the language: `puts` resolves to
-  # `Yup.Runtime.puts/1` regardless of caller-scope state, so a local binding
-  # would otherwise be silently shadowed by the dispatch clause above.
-  @reserved_names MapSet.new(["puts"])
+  # Names whose binding is reserved by the language: `puts`, `map`, and
+  # `select` resolve directly to `Yup.Runtime` functions regardless of
+  # caller-scope state, so a local binding would otherwise be silently
+  # shadowed by the dispatch clauses below.
+  @reserved_names MapSet.new(["puts", "map", "select"])
 
   def module_name(%Program{} = program) do
     key = program.source_path || :erlang.term_to_binary(program)
@@ -104,6 +107,8 @@ defmodule Yup.Compiler.Erlang do
 
     case {name, call_args} do
       {"puts", [arg]} -> remote_call(line, :"Elixir.Yup.Runtime", :puts, [arg])
+      {"map", [_, _]} -> remote_call(line, :"Elixir.Yup.Runtime", :map, call_args)
+      {"select", [_, _]} -> remote_call(line, :"Elixir.Yup.Runtime", :select, call_args)
       _ -> dispatch_call(name, call_args, line, function_names)
     end
   end
@@ -134,16 +139,18 @@ defmodule Yup.Compiler.Erlang do
     {:tuple, line(node), elements}
   end
 
-  defp expr(%RecordConstruction{name: _name, fields: fields} = node, function_names) do
+  defp expr(%RecordConstruction{name: _name, fields: fields} = node, function_names),
+    do: {:map, line(node), map_field_asts(fields, line(node), function_names)}
+
+  defp expr(%MapLiteral{fields: fields} = node, function_names),
+    do: {:map, line(node), map_field_asts(fields, line(node), function_names)}
+
+  defp expr(%ListLiteral{elements: elements} = node, function_names) do
     line = line(node)
 
-    field_asts =
-      Enum.map(fields, fn {field_name, value, _field_loc} ->
-        {:map_field_assoc, line, {:atom, line, String.to_atom(field_name)},
-         expr(value, function_names)}
-      end)
-
-    {:map, line, field_asts}
+    Enum.reduce(Enum.reverse(elements), {nil, line}, fn element, tail ->
+      {:cons, line, expr(element, function_names), tail}
+    end)
   end
 
   defp expr(%FieldAccess{record: record, field: field} = node, function_names) do
@@ -272,12 +279,15 @@ defmodule Yup.Compiler.Erlang do
   end
 
   defp rename_in_node(%RecordConstruction{fields: fields} = node, mapping) do
-    renamed =
-      Enum.map(fields, fn {name, value, field_loc} ->
-        {name, rename_in_node(value, mapping), field_loc}
-      end)
+    %{node | fields: rename_in_fields(fields, mapping)}
+  end
 
-    %{node | fields: renamed}
+  defp rename_in_node(%MapLiteral{fields: fields} = node, mapping) do
+    %{node | fields: rename_in_fields(fields, mapping)}
+  end
+
+  defp rename_in_node(%ListLiteral{elements: elements} = node, mapping) do
+    %{node | elements: Enum.map(elements, &rename_in_node(&1, mapping))}
   end
 
   defp rename_in_node(%Binding{value: value} = node, mapping) do
@@ -301,6 +311,19 @@ defmodule Yup.Compiler.Erlang do
 
   defp rename_in_clause(%MatchClause{pattern: _pattern, body: body} = clause, mapping) do
     %{clause | body: rename_in_body(body, mapping)}
+  end
+
+  defp rename_in_fields(fields, mapping) do
+    Enum.map(fields, fn {name, value, field_loc} ->
+      {name, rename_in_node(value, mapping), field_loc}
+    end)
+  end
+
+  defp map_field_asts(fields, line, function_names) do
+    Enum.map(fields, fn {field_name, value, _field_loc} ->
+      {:map_field_assoc, line, {:atom, line, String.to_atom(field_name)},
+       expr(value, function_names)}
+    end)
   end
 
   defp remote_call(line, module, function, args) do
@@ -402,6 +425,18 @@ defmodule Yup.Compiler.Erlang do
     Enum.each(fields, fn {_name, value, _loc} -> check_node(value, declarations, path) end)
   end
 
+  defp check_node(%MapLiteral{fields: fields}, declarations, path) do
+    validate_no_duplicate_fields!(fields, path, fn dup_name ->
+      "duplicate key #{dup_name} in map literal"
+    end)
+
+    Enum.each(fields, fn {_name, value, _loc} -> check_node(value, declarations, path) end)
+  end
+
+  defp check_node(%ListLiteral{elements: elements}, declarations, path) do
+    Enum.each(elements, fn element -> check_node(element, declarations, path) end)
+  end
+
   defp check_node(_node, _declarations, _path), do: :ok
 
   defp validate_record(
@@ -419,49 +454,64 @@ defmodule Yup.Compiler.Erlang do
         }
 
       {:ok, %{fields: declared_fields}} ->
-        result =
-          Enum.reduce_while(fields, MapSet.new(), fn {n, _v, loc}, seen ->
-            if MapSet.member?(seen, n),
-              do: {:halt, {:dup, n, loc}},
-              else: {:cont, MapSet.put(seen, n)}
+        provided =
+          validate_no_duplicate_fields!(fields, path, fn dup_name ->
+            "duplicate field #{dup_name} in record #{name} construction"
           end)
 
-        case result do
-          {:dup, dup_name, dup_loc} ->
+        case MapSet.difference(provided, declared_fields) |> Enum.take(1) do
+          [unknown | _] ->
+            {_, _, field_loc} = Enum.find(fields, fn {n, _v, _l} -> n == unknown end)
+
             raise %SourceError{
               path: path,
-              line: dup_loc.line,
-              column: dup_loc.column,
-              message: "duplicate field #{dup_name} in record #{name} construction"
+              line: field_loc.line,
+              column: field_loc.column,
+              message: "record #{name} has no field #{unknown}"
             }
 
-          provided ->
-            case MapSet.difference(provided, declared_fields) |> Enum.take(1) do
-              [unknown | _] ->
-                {_, _, field_loc} = Enum.find(fields, fn {n, _v, _l} -> n == unknown end)
-
+          [] ->
+            case MapSet.difference(declared_fields, provided) |> Enum.take(1) do
+              [missing | _] ->
                 raise %SourceError{
                   path: path,
-                  line: field_loc.line,
-                  column: field_loc.column,
-                  message: "record #{name} has no field #{unknown}"
+                  line: loc.line,
+                  column: loc.column,
+                  message: "record #{name} is missing field #{missing}"
                 }
 
               [] ->
-                case MapSet.difference(declared_fields, provided) |> Enum.take(1) do
-                  [missing | _] ->
-                    raise %SourceError{
-                      path: path,
-                      line: loc.line,
-                      column: loc.column,
-                      message: "record #{name} is missing field #{missing}"
-                    }
-
-                  [] ->
-                    :ok
-                end
+                :ok
             end
         end
+    end
+  end
+
+  defp validate_no_duplicate_fields!(fields, path, message_fn) do
+    case find_duplicate_field(fields) do
+      {:dup, name, loc} ->
+        raise %SourceError{
+          path: path,
+          line: loc.line,
+          column: loc.column,
+          message: message_fn.(name)
+        }
+
+      {:ok, provided} ->
+        provided
+    end
+  end
+
+  defp find_duplicate_field(fields) do
+    fields
+    |> Enum.reduce_while(MapSet.new(), fn {n, _v, loc}, seen ->
+      if MapSet.member?(seen, n),
+        do: {:halt, {:dup, n, loc}},
+        else: {:cont, MapSet.put(seen, n)}
+    end)
+    |> case do
+      {:dup, _, _} = dup -> dup
+      provided -> {:ok, provided}
     end
   end
 

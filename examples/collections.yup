@@ -1,0 +1,13 @@
+values = [1, 2, 3]
+
+doubled = values.map { |value| value * 2 }
+puts doubled
+
+evens = values.select { |value| value / 2 * 2 == value }
+puts evens
+
+puts values
+
+user = { name: "Ada", active: true }
+puts user.name
+puts user.active

@@ -18,8 +18,10 @@ defmodule Yup.Parser do
     FieldAccess,
     Function,
     Identifier,
+    ListLiteral,
     Literal,
     LiteralPattern,
+    MapLiteral,
     Match,
     MatchClause,
     Model,
@@ -580,6 +582,13 @@ defmodule Yup.Parser do
   defp reject_dot_calls!(%AnonymousFunction{body: body}, path),
     do: Enum.each(body, &reject_dot_calls!(&1, path))
 
+  defp reject_dot_calls!(%ListLiteral{elements: elements}, path),
+    do: Enum.each(elements, &reject_dot_calls!(&1, path))
+
+  defp reject_dot_calls!(%MapLiteral{fields: fields}, path) do
+    Enum.each(fields, fn {_name, value, _loc} -> reject_dot_calls!(value, path) end)
+  end
+
   defp reject_dot_calls!(_node, _path), do: :ok
 
   defp parse_ternary(tokens, path) do
@@ -1008,6 +1017,16 @@ defmodule Yup.Parser do
         node = %Call{name: name, args: args, receiver: expr, loc: loc(line, column)}
         parse_postfix_tail(node, remaining, path)
 
+      [
+        %{type: :identifier, value: name, line: line, column: column},
+        %{type: :lbrace, line: brace_line, column: brace_column} | after_lbrace
+      ] ->
+        {block, remaining} =
+          parse_anonymous_function(brace_line, brace_column, after_lbrace, path)
+
+        node = %Call{name: name, args: [block], receiver: expr, loc: loc(line, column)}
+        parse_postfix_tail(node, remaining, path)
+
       [%{type: :identifier, value: field, line: line, column: column} | after_field] ->
         node = %FieldAccess{record: expr, field: field, loc: loc(line, column)}
         parse_postfix_tail(node, after_field, path)
@@ -1136,6 +1155,34 @@ defmodule Yup.Parser do
   end
 
   defp parse_primary([%{type: :lbrace, line: line, column: column} | rest], path) do
+    case rest do
+      [%{type: :pipe} | _] ->
+        parse_anonymous_function(line, column, rest, path)
+
+      [%{type: :kwarg} | _] ->
+        parse_map_literal(line, column, rest, path)
+
+      [%{type: :rbrace} | tail] ->
+        {%MapLiteral{fields: [], loc: loc(line, column)}, tail}
+
+      [%{line: bad_line, column: bad_column} | _] ->
+        raise source_error(path, bad_line, bad_column, "expected | or a field name after {")
+
+      [] ->
+        raise source_error(path, nil, nil, "expected } or block")
+    end
+  end
+
+  defp parse_primary([%{type: :lbracket, line: line, column: column} | rest], path) do
+    {elements, remaining} = parse_list_elements(rest, path, [])
+    {%ListLiteral{elements: elements, loc: loc(line, column)}, remaining}
+  end
+
+  defp parse_primary([%{value: value, line: line, column: column} | _], path) do
+    raise source_error(path, line, column, "unexpected token #{value}")
+  end
+
+  defp parse_anonymous_function(line, column, rest, path) do
     {params, after_params} = parse_block_params(rest, path)
     {body_expr, after_body} = parse_or(after_params, path)
 
@@ -1151,8 +1198,73 @@ defmodule Yup.Parser do
     end
   end
 
-  defp parse_primary([%{value: value, line: line, column: column} | _], path) do
-    raise source_error(path, line, column, "unexpected token #{value}")
+  defp parse_map_literal(line, column, tokens, path) do
+    {fields, remaining} = parse_map_fields(tokens, path, [])
+
+    case remaining do
+      [%{type: :rbrace} | tail] ->
+        {%MapLiteral{fields: fields, loc: loc(line, column)}, tail}
+
+      [%{line: bad_line, column: bad_column} | _] ->
+        raise source_error(path, bad_line, bad_column, "expected , or } in map literal")
+
+      [] ->
+        raise source_error(path, nil, nil, "expected } in map literal")
+    end
+  end
+
+  defp parse_map_fields([%{type: :rbrace} | _] = tokens, _path, acc),
+    do: {Enum.reverse(acc), tokens}
+
+  defp parse_map_fields(
+         [%{type: :kwarg, value: name, line: line, column: column} | rest],
+         path,
+         acc
+       ) do
+    {value, after_value} = parse_or(rest, path)
+    field = {name, value, loc(line, column)}
+
+    case after_value do
+      [%{type: :comma} | tail] ->
+        parse_map_fields(tail, path, [field | acc])
+
+      [%{type: :rbrace} | _] = tail ->
+        {Enum.reverse([field | acc]), tail}
+
+      [%{line: line, column: column} | _] ->
+        raise source_error(path, line, column, "expected , or } in map literal")
+
+      [] ->
+        raise source_error(path, nil, nil, "expected } in map literal")
+    end
+  end
+
+  defp parse_map_fields([%{line: line, column: column} | _], path, _acc) do
+    raise source_error(path, line, column, "expected field name in map literal")
+  end
+
+  defp parse_map_fields([], path, _acc) do
+    raise source_error(path, nil, nil, "expected } in map literal")
+  end
+
+  defp parse_list_elements([%{type: :rbracket} | rest], _path, acc), do: {Enum.reverse(acc), rest}
+
+  defp parse_list_elements(tokens, path, acc) do
+    {expr, rest} = parse_or(tokens, path)
+
+    case rest do
+      [%{type: :comma} | tail] ->
+        parse_list_elements(tail, path, [expr | acc])
+
+      [%{type: :rbracket} | tail] ->
+        {Enum.reverse([expr | acc]), tail}
+
+      [%{line: line, column: column} | _] ->
+        raise source_error(path, line, column, "expected , or ] in list literal")
+
+      [] ->
+        raise source_error(path, nil, nil, "expected ] in list literal")
+    end
   end
 
   defp parse_block_params([%{type: :pipe} | rest], path),
@@ -1274,6 +1386,8 @@ defmodule Yup.Parser do
         {".", :dot},
         {"{", :lbrace},
         {"}", :rbrace},
+        {"[", :lbracket},
+        {"]", :rbracket},
         {"|", :pipe}
       ] do
     defp tokenize(<<unquote(char), rest::binary>>, line, path, column, acc) do

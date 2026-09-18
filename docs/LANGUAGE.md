@@ -230,6 +230,90 @@ of scope and are rejected with a source-located error, since actor
 references may eventually use different dot-call dispatch once actor
 semantics are designed; that dispatch remains unresolved.
 
+## Immutable Collections
+
+YupYup has a list literal and a map literal. Both are ordinary immutable
+values: operations on them always return a new value, and the BEAM's own
+list and map representations already guarantee this without any extra
+runtime bookkeeping.
+
+List literals hold an ordered sequence of expressions:
+
+```yup
+values = [1, 2, 3]
+nested = [1, [2, 3]]
+empty = []
+```
+
+A list literal lowers directly to a native BEAM list, so YupYup lists are as
+BEAM-friendly as it gets.
+
+Map literals hold `name: value` fields, the same keyword-field syntax
+`Type.new(name: value)` already uses for record construction, but without a
+declared `record` type:
+
+```yup
+user = { name: "Ada", active: true }
+puts user.name
+puts user.active
+```
+
+A map literal lowers to a native BEAM map, identically to how a record
+construction lowers (see [Records](#records)); field access on a map literal
+value uses the same dot syntax and `maps:get/2` lowering that record field
+access uses. Supplying the same key twice in one map literal is a compile
+error reported at the offending key's source location. An empty map literal
+is written `{}`.
+
+Because a block literal is also written with braces, `{ ... }` is
+disambiguated by what follows the opening brace: `{ |params| ... }` is a
+block (see [Implemented In The Bootstrap](#implemented-in-the-bootstrap)),
+`{ name: value, ... }` or `{}` is a map literal, and anything else is a
+syntax error naming both possibilities. This resolves the map-literal-versus-
+records design question left open when collections were proposed: an
+anonymous map literal is the dynamic, untyped counterpart to a declared
+`record`, and reuses the same lowering and field-access machinery.
+
+Lists support a small, block-driven operation set: `map` transforms each
+element, and `select` keeps only the elements where the block returns a
+truthy value. Neither operation is ordinary Ruby Enumerable parity — they are
+the minimum needed for small functional programs, and both return a new list
+rather than changing the receiver.
+
+```yup
+values = [1, 2, 3]
+doubled = values.map { |value| value * 2 }
+evens = values.select { |value| value / 2 * 2 == value }
+```
+
+`collection.operation { |x| ... }` is new postfix syntax: a dot call whose
+sole argument is a trailing block written without parentheses, rather than
+`collection.operation({ |x| ... })`. Both forms parse to the same `Call`
+node with the block as its one argument; the parenthesized form already
+worked before this trailing-block form was added, since a block literal was
+already an ordinary expression. `map` and `select` are reserved names —
+defining a top-level function or binding a local name called `map` or
+`select` is a compile error, the same restriction `puts` already has, since
+both names dispatch straight to `Yup.Runtime` regardless of whether the call
+has a receiver.
+
+`puts` prints a list as `[1, 2, 3]` and a map as `{name: "Ada"}` rather than
+treating a list of integers as an Erlang charlist. Strings nested inside a
+printed list or map are quoted (`["a", "b"]`) so they are distinguishable
+from other element kinds; a top-level `puts "a"` is unaffected and still
+prints the bare string. Map keys print in sorted order since BEAM maps do
+not preserve insertion order.
+
+Calling `map` or `select` on a value that is not a list is a runtime error.
+Calling any other collection-shaped operation name (for example `reduce`,
+which is not implemented) is not specially recognized, so it falls through
+to ordinary call dispatch and fails to compile as an unbound reference,
+consistent with calling any other undefined name.
+
+List literals do not yet support indexing, pattern matching inside `match`,
+or a Set type; a Set is left for a later issue. See [Current
+Limitations](#current-limitations) for what else is out of scope.
+
 ## Type Annotations
 
 YupYup parses type annotations as first-class syntax so future checkers can
@@ -292,7 +376,9 @@ intent available without a separate annotation sidecar.
 
 ## Current Limitations
 
-The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested blocks other than `def ... end`, `match ... end`, and `record ... end`, string interpolation, arrays, comments inside string literals, type-scoped methods, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors (including actor dot-call dispatch), full type checking, or verification constructs.
+The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested blocks other than `def ... end`, `match ... end`, and `record ... end`, string interpolation, comments inside string literals, type-scoped methods, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors (including actor dot-call dispatch), full type checking, or verification constructs.
+
+List and map literals (see [Immutable Collections](#immutable-collections)) are the only collection types today: there is no Set, no indexing into a list, no list or map pattern inside `match`, and no collection operations beyond `map` and `select`.
 
 Type annotations are parsed and preserved on the AST but the bootstrap does
 not enforce them. See [Type Annotations](#type-annotations) above and the

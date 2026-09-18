@@ -29,7 +29,7 @@ YupYup AST
 
 `Yup.Parser` is a small hand-written parser. It preserves line and column locations on AST nodes. The parser is line-oriented for the first slice, but this is not a long-term grammar commitment.
 
-`Yup.AST.*` modules define explicit structs for programs, functions, anonymous functions, calls, bindings, identifiers, literals, binary operations, unary operations, constructor expressions, `match` expressions, match clauses, literal/binder/constructor patterns, pattern matching, models, model state, transitions, ternary operations, and state access/update expressions.
+`Yup.AST.*` modules define explicit structs for programs, functions, anonymous functions, calls, bindings, identifiers, literals, list literals, map literals, binary operations, unary operations, constructor expressions, `match` expressions, match clauses, literal/binder/constructor patterns, pattern matching, models, model state, transitions, ternary operations, and state access/update expressions.
 
 `Yup.Compiler` owns compilation and execution orchestration.
 
@@ -52,6 +52,8 @@ Generated modules are named deterministically from the source path when availabl
 Bindings are immutable. Rebinding a name in the same scope is rejected before lowering. Erlang variables also reinforce this design choice.
 
 Records are first-class immutable product types. Their declarations live on `Yup.AST.Program.records` and are validated by `Yup.Compiler.Erlang` before lowering. Construction lowers to a BEAM map literal and field access lowers to `maps:get/2`, which keeps the runtime simple until a richer structural type system can take over.
+
+`Yup.AST.ListLiteral` lowers to a native BEAM list and `Yup.AST.MapLiteral` lowers to the same BEAM map literal form as record construction, sharing a lowering helper in `Yup.Compiler.Erlang`. Both are immutable by construction: BEAM lists and maps never mutate in place, so `map`/`select` (in `Yup.Runtime`) always return a new list rather than changing the receiver.
 Model constructs (`model`, `state`, `transition`) are parsed into explicit AST nodes but are not lowered to BEAM. They are preserved in `Program.models` for future analysis passes (model checking, constraint finding) that consume the AST independently of the execution compiler.
 
 ## Open Tradeoffs
