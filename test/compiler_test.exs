@@ -767,6 +767,119 @@ defmodule Yup.CompilerTest do
     end)
   end
 
+  # ── dot calls and chaining (issue #3) ───────────────────────────────
+
+  test "a dot call runs the same as the equivalent ordinary call" do
+    source = """
+    def double(value)
+      value * 2
+    end
+
+    puts double(3)
+    puts 3.double()
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "dot_call.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "6\n6\n"
+  end
+
+  test "a dot call passes the receiver as the first argument alongside other args" do
+    source = """
+    def add(value, amount)
+      value + amount
+    end
+
+    puts 3.add(4)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "dot_call.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "7\n"
+  end
+
+  test "chained dot calls evaluate left to right" do
+    source = """
+    def double(value)
+      value * 2
+    end
+
+    def add(value, amount)
+      value + amount
+    end
+
+    puts 3.double().add(4)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "dot_call.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "10\n"
+  end
+
+  test "a dot call resolves a bound function value receiver-first" do
+    source = """
+    double = { |x| x * 2 }
+    puts 5.double()
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "dot_call.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "10\n"
+  end
+
+  test "mixes field reads and dot calls in one chain" do
+    source = """
+    record Address
+      city
+    end
+
+    record Person
+      address
+    end
+
+    def shout(text)
+      text + "!"
+    end
+
+    person = Person.new(address: Address.new(city: "Boston"))
+    puts person.address.city.shout()
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "dot_call.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "Boston!\n"
+  end
+
   test "compiles program with models alongside executable code" do
     source = """
     model Light

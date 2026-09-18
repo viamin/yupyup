@@ -4,7 +4,7 @@ GitHub issues are intended to be the source of truth for actionable work once th
 
 1. Expand the core expression language, bindings, literals, and diagnostics.
 2. Establish first-class functions and Ruby-style blocks.
-3. Define dot-call semantics and chaining for immutable values.
+3. Define dot-call semantics and chaining for immutable values. *(Ordinary receiver-first dot calls and full postfix chaining now ship in the bootstrap; actor dot-call dispatch remains open, see #3.)*
 4. Add immutable collections and functional collection operations.
 5. Add pattern matching and immutable product types. *(Pattern matching and records now ship in the bootstrap; richer constructors and destructure patterns remain.)*
 6. Parse type annotations, then implement a small gradual structural type checker.

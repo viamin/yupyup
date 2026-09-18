@@ -502,6 +502,190 @@ defmodule Yup.ParserTest do
             }} = Yup.Parser.parse("1 + person.age", path: "expr.yup")
   end
 
+  # ── dot calls and chaining (issue #3) ───────────────────────────────
+
+  test "parses a dot call as a receiver-first call" do
+    assert {:ok,
+            %Program{
+              body: [
+                %Call{
+                  name: "double",
+                  args: [],
+                  receiver: %Literal{kind: :integer, value: 3}
+                }
+              ]
+            }} = Yup.Parser.parse("3.double()", path: "expr.yup")
+  end
+
+  test "parses a dot call with arguments" do
+    assert {:ok,
+            %Program{
+              body: [
+                %Call{
+                  name: "add",
+                  args: [%Literal{kind: :integer, value: 4}],
+                  receiver: %Identifier{name: "value"}
+                }
+              ]
+            }} = Yup.Parser.parse("value.add(4)", path: "expr.yup")
+  end
+
+  test "preserves source location on a dot call" do
+    assert {:ok, %Program{body: [%Call{loc: loc}]}} =
+             Yup.Parser.parse("3.double()", path: "expr.yup")
+
+    assert loc == %{line: 1, column: 3}
+  end
+
+  test "a bare field read remains a field access, not a call" do
+    assert {:ok,
+            %Program{
+              body: [
+                %FieldAccess{record: %Identifier{name: "person"}, field: "name"}
+              ]
+            }} = Yup.Parser.parse("person.name", path: "expr.yup")
+  end
+
+  test "a dot call with an empty argument list has no args" do
+    assert {:ok,
+            %Program{
+              body: [%Call{name: "name", args: [], receiver: %Identifier{name: "person"}}]
+            }} = Yup.Parser.parse("person.name()", path: "expr.yup")
+  end
+
+  test "dot calls chain left to right" do
+    assert {:ok,
+            %Program{
+              body: [
+                %Call{
+                  name: "second",
+                  args: [%Literal{kind: :integer, value: 4}],
+                  receiver: %Call{name: "first", args: [], receiver: %Identifier{name: "value"}}
+                }
+              ]
+            }} = Yup.Parser.parse("value.first().second(4)", path: "expr.yup")
+  end
+
+  test "mixes field reads and dot calls in a single chain" do
+    assert {:ok,
+            %Program{
+              body: [
+                %Call{
+                  name: "length",
+                  args: [],
+                  receiver: %Call{
+                    name: "format",
+                    args: [],
+                    receiver: %FieldAccess{
+                      record: %Identifier{name: "person"},
+                      field: "address"
+                    }
+                  }
+                }
+              ]
+            }} = Yup.Parser.parse("person.address.format().length()", path: "expr.yup")
+  end
+
+  test "a dot call on a record construction chains correctly" do
+    source = """
+    record Person
+      name
+    end
+
+    Person.new(name: "Ada").greet()
+    """
+
+    assert {:ok,
+            %Program{
+              body: [
+                %Call{name: "greet", args: [], receiver: %RecordConstruction{name: "Person"}}
+              ]
+            }} = Yup.Parser.parse(source, path: "expr.yup")
+  end
+
+  test "dot calls bind tighter than binary operators" do
+    assert {:ok,
+            %Program{
+              body: [
+                %BinaryOp{
+                  op: "+",
+                  left: %Call{name: "double", args: [], receiver: %Literal{value: 1}},
+                  right: %Call{name: "double", args: [], receiver: %Literal{value: 2}}
+                }
+              ]
+            }} = Yup.Parser.parse("1.double() + 2.double()", path: "expr.yup")
+  end
+
+  test "record construction still constructs a record and does not become a dot call" do
+    source = """
+    record Person
+      name
+      age
+    end
+
+    person = Person.new(name: "Ada", age: 42)
+    """
+
+    assert {:ok,
+            %Program{
+              body: [
+                %Binding{
+                  value: %RecordConstruction{
+                    name: "Person",
+                    fields: [
+                      {"name", %Literal{kind: :string, value: "Ada"}, _},
+                      {"age", %Literal{kind: :integer, value: 42}, _}
+                    ]
+                  }
+                }
+              ]
+            }} = Yup.Parser.parse(source, path: "expr.yup")
+  end
+
+  test "reports expected field name after . for malformed dot syntax" do
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("value.()", path: "bad.yup")
+
+    assert error.message =~ "expected field name after ."
+  end
+
+  test "reports missing closing paren for a malformed dot call" do
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse("value.operation(1", path: "bad.yup")
+
+    assert error.message =~ "expected"
+  end
+
+  test "rejects a dot call on state access in a model expression" do
+    source = """
+    model Light
+
+      transition toggle do
+        state.value = state.value()
+      end
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+
+    assert error.message =~ "dot calls are not supported in model expressions"
+  end
+
+  test "rejects a dot call on a record construction in a model expression" do
+    source = """
+    record Light
+      value
+    end
+
+    model Beacon
+      state value = Light.new(value: :off).value()
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+
+    assert error.message =~ "dot calls are not supported in model expressions"
+  end
+
   test "parses standalone atom literals" do
     assert {:ok, %Program{body: [%Call{args: [%Literal{kind: :atom, value: :weird}]}]}} =
              Yup.Parser.parse("puts :weird", path: "atom.yup")
@@ -513,8 +697,7 @@ defmodule Yup.ParserTest do
       name
     """
 
-    assert {:error, %Yup.SourceError{} = error} =
-             Yup.Parser.parse(source, path: "record.yup")
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "record.yup")
 
     assert error.message =~ "missing end for record Person"
   end
@@ -528,8 +711,7 @@ defmodule Yup.ParserTest do
     end
     """
 
-    assert {:error, %Yup.SourceError{} = error} =
-             Yup.Parser.parse(source, path: "nested.yup")
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "nested.yup")
 
     assert error.message =~ "record declarations are only allowed at the top level"
   end

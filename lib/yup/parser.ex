@@ -280,14 +280,13 @@ defmodule Yup.Parser do
          return_type
        ) do
     if String.trim(end_text) == "end" do
-      fn_ast =
-        %Function{
-          name: name,
-          params: params,
-          body: body,
-          return_type: return_type,
-          loc: loc(line, 1)
-        }
+      fn_ast = %Function{
+        name: name,
+        params: params,
+        body: body,
+        return_type: return_type,
+        loc: loc(line, 1)
+      }
 
       {fn_ast, remaining}
     else
@@ -343,12 +342,11 @@ defmodule Yup.Parser do
                trimmed
              ) do
           [_, field, type_name] ->
-            field_ast =
-              %RecordField{
-                name: field,
-                type: type_ref_for(type_name, text, :colon, line, path),
-                loc: loc(line, column_in(text, field))
-              }
+            field_ast = %RecordField{
+              name: field,
+              type: type_ref_for(type_name, text, :colon, line, path),
+              loc: loc(line, column_in(text, field))
+            }
 
             parse_record_fields(rest, path, [field_ast | acc])
 
@@ -531,12 +529,58 @@ defmodule Yup.Parser do
 
     case rest do
       [] ->
+        reject_dot_calls!(expr, path)
         expr
 
       [%{value: value, column: column} | _] ->
         raise source_error(path, line, column, "unexpected token #{value}")
     end
   end
+
+  # Dot calls are out of scope for model expressions (issue #3): actor dot-call
+  # dispatch is unresolved, and ordinary receiver-first calls would otherwise
+  # silently parse inside state/transition expressions.
+  defp reject_dot_calls!(%Call{receiver: receiver} = node, path) when not is_nil(receiver) do
+    raise source_error(
+            path,
+            line_from(node),
+            column_from(node),
+            "dot calls are not supported in model expressions"
+          )
+  end
+
+  defp reject_dot_calls!(%Call{args: args}, path),
+    do: Enum.each(args, &reject_dot_calls!(&1, path))
+
+  defp reject_dot_calls!(%BinaryOp{left: left, right: right}, path) do
+    reject_dot_calls!(left, path)
+    reject_dot_calls!(right, path)
+  end
+
+  defp reject_dot_calls!(%UnaryOp{operand: operand}, path), do: reject_dot_calls!(operand, path)
+
+  defp reject_dot_calls!(
+         %TernaryOp{condition: condition, then_expr: then_expr, else_expr: else_expr},
+         path
+       ) do
+    reject_dot_calls!(condition, path)
+    reject_dot_calls!(then_expr, path)
+    reject_dot_calls!(else_expr, path)
+  end
+
+  defp reject_dot_calls!(%FieldAccess{record: record}, path), do: reject_dot_calls!(record, path)
+
+  defp reject_dot_calls!(%Constructor{args: args}, path),
+    do: Enum.each(args, &reject_dot_calls!(&1, path))
+
+  defp reject_dot_calls!(%RecordConstruction{fields: fields}, path) do
+    Enum.each(fields, fn {_name, value, _loc} -> reject_dot_calls!(value, path) end)
+  end
+
+  defp reject_dot_calls!(%AnonymousFunction{body: body}, path),
+    do: Enum.each(body, &reject_dot_calls!(&1, path))
+
+  defp reject_dot_calls!(_node, _path), do: :ok
 
   defp parse_ternary(tokens, path) do
     {condition, rest} = parse_or(tokens, path)
@@ -956,6 +1000,14 @@ defmodule Yup.Parser do
 
   defp parse_postfix_tail(expr, [%{type: :dot, line: dot_line, column: dot_column} | rest], path) do
     case rest do
+      [
+        %{type: :identifier, value: name, line: line, column: column},
+        %{type: :lparen} | after_lparen
+      ] ->
+        {args, remaining} = parse_call_args(after_lparen, path, [])
+        node = %Call{name: name, args: args, receiver: expr, loc: loc(line, column)}
+        parse_postfix_tail(node, remaining, path)
+
       [%{type: :identifier, value: field, line: line, column: column} | after_field] ->
         node = %FieldAccess{record: expr, field: field, loc: loc(line, column)}
         parse_postfix_tail(node, after_field, path)
@@ -1050,9 +1102,20 @@ defmodule Yup.Parser do
            %{type: :identifier, value: name}
            | rest
          ],
-         _path
+         path
        ) do
-    {%StateAccess{name: name, loc: loc(line, column)}, rest}
+    case rest do
+      [%{type: :lparen, line: lp_line, column: lp_column} | _] ->
+        raise source_error(
+                path,
+                lp_line,
+                lp_column,
+                "dot calls are not supported in model expressions"
+              )
+
+      _ ->
+        {%StateAccess{name: name, loc: loc(line, column)}, rest}
+    end
   end
 
   defp parse_primary(

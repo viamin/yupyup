@@ -35,12 +35,39 @@ defmodule Yup.CLITest do
   end
 
   test "runs records example through built escript", %{yup: yup} do
-    assert {output, 0} =
-             System.cmd(yup, ["run", "examples/records.yup"], stderr_to_stdout: true)
+    assert {output, 0} = System.cmd(yup, ["run", "examples/records.yup"], stderr_to_stdout: true)
 
     assert output =~ "Ada"
     assert output =~ "42"
     assert output =~ "Grace"
+  end
+
+  test "runs dot_calls example through built escript", %{yup: yup} do
+    assert {output, 0} =
+             System.cmd(yup, ["run", "examples/dot_calls.yup"], stderr_to_stdout: true)
+
+    assert output =~ "6"
+    assert output =~ "10"
+    assert output =~ "Ada"
+  end
+
+  @tag :tmp_dir
+  test "reports dot calls in model expressions as a source-located error", %{
+    tmp_dir: tmp_dir,
+    yup: yup
+  } do
+    path = Path.join(tmp_dir, "model_dot_call.yup")
+
+    File.write!(path, """
+    model Light
+      transition toggle do
+        state.value = state.value()
+      end
+    end
+    """)
+
+    assert {output, 1} = System.cmd(yup, ["run", path], stderr_to_stdout: true)
+    assert output =~ "dot calls are not supported in model expressions"
   end
 
   @tag :tmp_dir

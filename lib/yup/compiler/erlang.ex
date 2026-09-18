@@ -98,18 +98,13 @@ defmodule Yup.Compiler.Erlang do
   defp expr(%Binding{name: name, value: value} = node, function_names),
     do: {:match, line(node), var(name, line(node)), expr(value, function_names)}
 
-  defp expr(%Call{name: "puts", args: [arg]} = node, function_names) do
-    remote_call(line(node), :"Elixir.Yup.Runtime", :puts, [expr(arg, function_names)])
-  end
-
-  defp expr(%Call{name: name, args: args} = node, function_names) do
+  defp expr(%Call{name: name, args: args, receiver: receiver} = node, function_names) do
     line = line(node)
-    call_args = Enum.map(args, &expr(&1, function_names))
+    call_args = call_args(receiver, args, function_names)
 
-    if MapSet.member?(function_names, name) do
-      {:call, line, {:atom, line, String.to_atom(name)}, call_args}
-    else
-      {:call, line, var(name, line), call_args}
+    case {name, call_args} do
+      {"puts", [arg]} -> remote_call(line, :"Elixir.Yup.Runtime", :puts, [arg])
+      _ -> dispatch_call(name, call_args, line, function_names)
     end
   end
 
@@ -168,6 +163,21 @@ defmodule Yup.Compiler.Erlang do
     case clause_forms do
       [] -> raise "internal compiler error: match has no clauses"
       _ -> {:case, line(node), subject_expr, clause_forms}
+    end
+  end
+
+  # A dot call like `4.double()` passes the receiver as the first argument to
+  # an ordinary YupYup call (issue #3); a plain call has no receiver.
+  defp call_args(nil, args, function_names), do: Enum.map(args, &expr(&1, function_names))
+
+  defp call_args(receiver, args, function_names),
+    do: [expr(receiver, function_names) | Enum.map(args, &expr(&1, function_names))]
+
+  defp dispatch_call(name, call_args, line, function_names) do
+    if MapSet.member?(function_names, name) do
+      {:call, line, {:atom, line, String.to_atom(name)}, call_args}
+    else
+      {:call, line, var(name, line), call_args}
     end
   end
 
@@ -245,8 +255,12 @@ defmodule Yup.Compiler.Erlang do
     %{node | operand: rename_in_node(operand, mapping)}
   end
 
-  defp rename_in_node(%Call{args: args} = node, mapping) do
-    %{node | args: Enum.map(args, &rename_in_node(&1, mapping))}
+  defp rename_in_node(%Call{args: args, receiver: receiver} = node, mapping) do
+    %{
+      node
+      | args: Enum.map(args, &rename_in_node(&1, mapping)),
+        receiver: receiver && rename_in_node(receiver, mapping)
+    }
   end
 
   defp rename_in_node(%Constructor{args: args} = node, mapping) do
@@ -370,7 +384,8 @@ defmodule Yup.Compiler.Erlang do
   defp check_node(%UnaryOp{operand: operand}, declarations, path),
     do: check_node(operand, declarations, path)
 
-  defp check_node(%Call{args: args}, declarations, path) do
+  defp check_node(%Call{args: args, receiver: receiver}, declarations, path) do
+    if receiver, do: check_node(receiver, declarations, path)
     Enum.each(args, fn arg -> check_node(arg, declarations, path) end)
   end
 
