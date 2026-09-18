@@ -880,6 +880,99 @@ defmodule Yup.CompilerTest do
     assert output == "Boston!\n"
   end
 
+  # ── immutable collection operations ─────────────────────────────────
+
+  test "collection operations accept a function value in place of a block" do
+    source = """
+    double = { |x| x * 2 }
+    values = [1, 2, 3]
+    puts values.map(double)
+    puts map(values, double)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[2, 4, 6]\n[2, 4, 6]\n"
+  end
+
+  test "select, each, and reduce accept function values" do
+    source = """
+    values = [1, 2, 3]
+    bigger = { |value| value > 1 }
+    puts values.select(bigger)
+
+    show = { |value| puts value }
+    values.each(show)
+
+    add = { |sum, value| sum + value }
+    puts values.reduce(0, add)
+    puts values.reduce(add)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[2, 3]\n1\n2\n3\n6\n6\n"
+  end
+
+  test "collection operations accept a function returned from a call" do
+    source = """
+    def doubler()
+      { |x| x * 2 }
+    end
+
+    values = [1, 2, 3]
+    puts values.map(doubler())
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[2, 4, 6]\n"
+  end
+
+  test "rejects map without a function argument" do
+    source = """
+    values = [1, 2, 3]
+    puts values.map()
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    assert_raise Yup.SourceError, ~r/map takes the collection and a function/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects length with extra arguments" do
+    source = """
+    values = [1, 2, 3]
+    puts values.length(1)
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    assert_raise Yup.SourceError, ~r/length takes the collection as its only argument/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
   test "compiles program with models alongside executable code" do
     source = """
     model Light

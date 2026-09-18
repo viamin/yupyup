@@ -35,13 +35,15 @@ defmodule Yup.Compiler.Erlang do
 
   # Builtin immutable collection operations, resolved only when the program
   # does not define a top-level `def` with the same name (user definitions
-  # shadow the builtins). `:block` operations take (collection, fun), `:reduce`
+  # shadow the builtins). `:fun` operations take (collection, fun), `:reduce`
   # takes (collection, fun) or (collection, initial, fun), and `:unary`
-  # operations take just the collection.
+  # operations take just the collection. The fun may be any expression that
+  # evaluates to a function value — a literal block, a bound name, or a call
+  # result — exactly like an ordinary function-value argument.
   @collection_ops %{
-    "map" => :block,
-    "select" => :block,
-    "each" => :block,
+    "map" => :fun,
+    "select" => :fun,
+    "each" => :fun,
     "reduce" => :reduce,
     "length" => :unary,
     "keys" => :unary,
@@ -116,7 +118,7 @@ defmodule Yup.Compiler.Erlang do
 
     Enum.reverse(elements)
     |> Enum.map(&expr(&1, function_names))
-    |> Enum.reduce({:nil, line}, &{:cons, line, &1, &2})
+    |> Enum.reduce({nil, line}, &{:cons, line, &1, &2})
   end
 
   defp expr(%MapLiteral{entries: entries} = node, function_names) do
@@ -135,7 +137,10 @@ defmodule Yup.Compiler.Erlang do
   defp expr(%Binding{name: name, value: value} = node, function_names),
     do: {:match, line(node), var(name, line(node)), expr(value, function_names)}
 
-  defp expr(%Call{name: name, args: args, receiver: receiver, block: block} = node, function_names) do
+  defp expr(
+         %Call{name: name, args: args, receiver: receiver, block: block} = node,
+         function_names
+       ) do
     line = line(node)
     # A trailing brace block is an ordinary function value passed as the
     # last argument, so `values.map { |v| v * 2 }` and
@@ -163,42 +168,6 @@ defmodule Yup.Compiler.Erlang do
       true ->
         dispatch_call(name, call_args, line, function_names)
     end
-  end
-
-  defp validate_collection_call!(name, receiver, arg_nodes, node) do
-    total = length(arg_nodes) + if receiver, do: 1, else: 0
-    block? = match?(%AnonymousFunction{}, List.last(arg_nodes))
-
-    case @collection_ops[name] do
-      :block ->
-        unless total == 2 and block?,
-          do:
-            raise_source_error(
-              node,
-              "#{name} requires a block like values.#{name} { |value| value * 2 }"
-            )
-
-      :reduce ->
-        unless total in 2..3 and block?,
-          do:
-            raise_source_error(
-              node,
-              "#{name} requires a block like values.#{name}(0) { |sum, value| sum + value }"
-            )
-
-      :unary ->
-        unless total == 1,
-          do: raise_source_error(node, "#{name} takes the collection as its only argument")
-    end
-  end
-
-  defp raise_source_error(node, message) do
-    raise %SourceError{
-      path: Process.get(:yup_source_path),
-      line: line(node),
-      column: column(node),
-      message: message
-    }
   end
 
   defp expr(%BinaryOp{op: op, left: left, right: right} = node, function_names) do
@@ -272,6 +241,45 @@ defmodule Yup.Compiler.Erlang do
     else
       {:call, line, var(name, line), call_args}
     end
+  end
+
+  # Only the arity is validated here: the fun argument may be any expression
+  # that evaluates to a function value (a literal block, a bound name, or a
+  # call result), matching how ordinary calls accept function values. Passing
+  # a non-function is a runtime error raised by the Yup.Runtime clauses.
+  defp validate_collection_call!(name, receiver, arg_nodes, node) do
+    total = length(arg_nodes) + if(receiver, do: 1, else: 0)
+
+    case @collection_ops[name] do
+      :fun ->
+        unless total == 2,
+          do:
+            raise_source_error(
+              node,
+              "#{name} takes the collection and a function, like values.#{name} { |value| value * 2 }"
+            )
+
+      :reduce ->
+        unless total in 2..3,
+          do:
+            raise_source_error(
+              node,
+              "#{name} takes the collection, an optional initial value, and a function, like values.#{name}(0) { |sum, value| sum + value }"
+            )
+
+      :unary ->
+        unless total == 1,
+          do: raise_source_error(node, "#{name} takes the collection as its only argument")
+    end
+  end
+
+  defp raise_source_error(node, message) do
+    raise %SourceError{
+      path: Process.get(:yup_source_path),
+      line: line(node),
+      column: column(node),
+      message: message
+    }
   end
 
   defp runtime_for("+"), do: :add
