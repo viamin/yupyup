@@ -56,7 +56,7 @@ defmodule Yup.CLITest do
              System.cmd(yup, ["run", "examples/collections.yup"], stderr_to_stdout: true)
 
     assert output =~ "[2, 4, 6]"
-    assert output =~ "[2, 3]"
+    assert output =~ "[2]"
     # The original list is printed again at the end, proving map/select never
     # mutated it.
     assert output =~ "[1, 2, 3]"
