@@ -244,7 +244,9 @@ defmodule Yup.ParserTest do
   end
 
   test "reports a missing pipe to start block parameters" do
-    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("{ x * 2 }", path: "bad.yup")
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse("values.map { x }", path: "bad.yup")
+
     assert error.message == "expected | to start block parameters"
   end
 
@@ -1330,5 +1332,13 @@ defmodule Yup.ParserTest do
              Yup.Parser.parse(~s({ name: 1, name: 2 }), path: "bad.yup")
 
     assert error.message =~ "duplicate key name in map literal"
+  end
+
+  test "reports a key entry error for a brace literal with no pipe and no key" do
+    # A `{` not followed by `|` starts a map literal (see docs/LANGUAGE.md),
+    # so `{ x * 2 }` fails on the first entry, not on block parameters.
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("{ x * 2 }", path: "bad.yup")
+
+    assert error.message == "expected key: value entry in map literal"
   end
 end

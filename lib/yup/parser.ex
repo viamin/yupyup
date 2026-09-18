@@ -1227,7 +1227,7 @@ defmodule Yup.Parser do
   end
 
   defp parse_map_literal(%{line: line, column: column}, tokens, path) do
-    {entries, remaining} = parse_map_entries(tokens, path, [], [])
+    {entries, remaining} = parse_map_entries(tokens, path, [], MapSet.new())
 
     case remaining do
       [%{type: :rbrace} | tail] ->
