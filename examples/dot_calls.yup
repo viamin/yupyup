@@ -1,0 +1,17 @@
+def double(value)
+  value * 2
+end
+
+def add(value, amount)
+  value + amount
+end
+
+puts 3.double()
+puts 3.double().add(4)
+
+record Person
+  name
+end
+
+person = Person.new(name: "Ada")
+puts person.name

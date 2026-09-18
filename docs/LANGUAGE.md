@@ -185,6 +185,51 @@ designed. Field access like `person.name` lowers to `maps:get(:name, person)`
 and produces a `badkey` error at runtime if the field is absent on a value
 that is not a well-formed record.
 
+## Dot Calls And Chaining
+
+For ordinary immutable values, `value.operation(arg)` behaves like
+`operation(value, arg)`: the receiver is passed as the first positional
+argument to an ordinary YupYup call — a known top-level `def` or a bound
+function value.
+
+```yup
+def double(value)
+  value * 2
+end
+
+def add(value, amount)
+  value + amount
+end
+
+puts 3.double().add(4)
+```
+
+Dot calls are postfix operations that bind tighter than unary and binary
+operators, and a chain of dot calls and field reads associates left to
+right. Field reads and calls can be mixed freely in a chain:
+
+```yup
+person.address.format().length()
+```
+
+Parentheses distinguish a field read from a call, including for a
+zero-argument call: `person.name` reads the `name` field, while
+`person.name()` calls `name` with `person` as its receiver. `Type.new(...)`
+remains the dedicated record-construction form and is unaffected by dot-call
+parsing; a value returned by `Type.new(...)` can itself start a dot-call
+chain.
+
+Dot calls are kept visible in the AST: `Yup.AST.Call` carries a `receiver`
+field that holds the parsed receiver expression, or `nil` for a plain call
+like `double(4)`.
+
+This milestone does not introduce type-scoped methods, mutation, or Ruby's
+object model — dot calls resolve to ordinary YupYup calls only. Dot calls
+inside model expressions (`state name = expr` and transition bodies) are out
+of scope and are rejected with a source-located error, since actor
+references may eventually use different dot-call dispatch once actor
+semantics are designed; that dispatch remains unresolved.
+
 ## Type Annotations
 
 YupYup parses type annotations as first-class syntax so future checkers can
@@ -247,7 +292,7 @@ intent available without a separate annotation sidecar.
 
 ## Current Limitations
 
-The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested blocks other than `def ... end`, `match ... end`, and `record ... end`, string interpolation, arrays, comments inside string literals, general method-call dot syntax, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors, full type checking, or verification constructs.
+The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested blocks other than `def ... end`, `match ... end`, and `record ... end`, string interpolation, arrays, comments inside string literals, type-scoped methods, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors (including actor dot-call dispatch), full type checking, or verification constructs.
 
 Type annotations are parsed and preserved on the AST but the bootstrap does
 not enforce them. See [Type Annotations](#type-annotations) above and the
@@ -295,19 +340,11 @@ Boolean operators are not short-circuiting in the BEAM backend yet. `true or (1 
 
 ## Proposed And Unresolved
 
-Dot calls may eventually make:
-
-```yup
-value.operation(arg)
-```
-
-behave conceptually like:
-
-```yup
-operation(value, arg)
-```
-
-for ordinary immutable values. Dot calls on actor references may instead represent message operations. The syntax can look similar while dispatch semantics depend on the receiver.
+Dot calls on actor references may represent message operations rather than
+ordinary receiver-first calls once actor semantics are designed. The syntax
+can look the same as an ordinary dot call while dispatch semantics depend on
+the receiver; this dispatch is unresolved (see [Dot Calls And
+Chaining](#dot-calls-and-chaining) for what is implemented today).
 
 The short `{ |x| x * 2 }` block form is implemented (see above). The
 Ruby-style multiline `do |value| ... end` block form is not implemented yet
