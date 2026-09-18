@@ -28,39 +28,11 @@ defmodule Yup.Compiler.Erlang do
 
   alias Yup.SourceError
 
-  # Names whose binding is reserved by the language: `puts` resolves to
-  # `Yup.Runtime.puts/1` regardless of caller-scope state, so a local binding
-  # would otherwise be silently shadowed by the dispatch clause above.
-  @reserved_names MapSet.new(["puts"])
-
-  # Builtin immutable collection operations, resolved only when the program
-  # does not define a top-level `def` with the same name (user definitions
-  # shadow the builtins). `:fun` operations take (collection, fun), `:reduce`
-  # takes (collection, fun) or (collection, initial, fun), and `:unary`
-  # operations take just the collection. The fun may be any expression that
-  # evaluates to a function value — a literal block, a bound name, or a call
-  # result — exactly like an ordinary function-value argument.
-  #
-  # Call resolution precedence for these names is: top-level `def` > `puts` >
-  # collection builtin > local binding (see the `expr(%Call{...})` cond
-  # below, and "Call Resolution Precedence" in docs/LANGUAGE.md). A plain
-  # call to one of these names always hits the builtin arm unless shadowed by
-  # a top-level `def`, even if a local variable of the same name is bound to
-  # a function value — e.g. `map = { |acc, x| acc + x }; map(0, 5)` still
-  # calls the builtin `map`, not the local binding. This is a deliberate,
-  # documented tradeoff rather than an oversight: reserving these names
-  # outright (like `puts`) would reject harmless data bindings such as
-  # `values = [1, 2, 3]`, which conflicts with a name in this map but is
-  # never called as a function.
-  @collection_ops %{
-    "map" => :fun,
-    "select" => :fun,
-    "each" => :fun,
-    "reduce" => :reduce,
-    "length" => :unary,
-    "keys" => :unary,
-    "values" => :unary
-  }
+  # Names whose binding is reserved by the language: `puts`, `map`, and
+  # `select` resolve directly to `Yup.Runtime` functions regardless of
+  # caller-scope state, so a local binding would otherwise be silently
+  # shadowed by the dispatch clauses below.
+  @reserved_names MapSet.new(["puts", "map", "select"])
 
   def module_name(%Program{} = program) do
     key = program.source_path || :erlang.term_to_binary(program)
@@ -76,7 +48,6 @@ defmodule Yup.Compiler.Erlang do
     validate_record_constructions!(program)
 
     Process.put(:yup_fresh_counter, :counters.new(1, []))
-    Process.put(:yup_source_path, program.source_path)
     module = module_name(program)
     function_names = MapSet.new(program.functions, & &1.name)
 
@@ -125,60 +96,20 @@ defmodule Yup.Compiler.Erlang do
      [{:bin_element, line, {:string, line, String.to_charlist(value)}, :default, :default}]}
   end
 
-  defp expr(%ListLiteral{elements: elements} = node, function_names) do
-    line = line(node)
-
-    Enum.reverse(elements)
-    |> Enum.map(&expr(&1, function_names))
-    |> Enum.reduce({nil, line}, &{:cons, line, &1, &2})
-  end
-
-  defp expr(%MapLiteral{entries: entries} = node, function_names) do
-    line = line(node)
-
-    field_asts =
-      Enum.map(entries, fn {key, value, _entry_loc} ->
-        {:map_field_assoc, line, {:atom, line, String.to_atom(key)}, expr(value, function_names)}
-      end)
-
-    {:map, line, field_asts}
-  end
-
   defp expr(%Identifier{name: name} = node, _function_names), do: var(name, line(node))
 
   defp expr(%Binding{name: name, value: value} = node, function_names),
     do: {:match, line(node), var(name, line(node)), expr(value, function_names)}
 
-  defp expr(
-         %Call{name: name, args: args, receiver: receiver, block: block} = node,
-         function_names
-       ) do
+  defp expr(%Call{name: name, args: args, receiver: receiver} = node, function_names) do
     line = line(node)
-    # A trailing brace block is an ordinary function value passed as the
-    # last argument, so `values.map { |v| v * 2 }` and
-    # `map(values, { |v| v * 2 })` lower identically.
-    arg_nodes = args ++ List.wrap(block)
-    call_args = call_args(receiver, arg_nodes, function_names)
+    call_args = call_args(receiver, args, function_names)
 
-    cond do
-      MapSet.member?(function_names, name) ->
-        {:call, line, {:atom, line, String.to_atom(name)}, call_args}
-
-      name == "puts" ->
-        case call_args do
-          [arg] ->
-            remote_call(line, :"Elixir.Yup.Runtime", :puts, [arg])
-
-          _ ->
-            raise_source_error(node, "puts takes exactly one argument")
-        end
-
-      Map.has_key?(@collection_ops, name) ->
-        validate_collection_call!(name, receiver, arg_nodes, node)
-        remote_call(line, :"Elixir.Yup.Runtime", String.to_atom(name), call_args)
-
-      true ->
-        dispatch_call(name, call_args, line, function_names)
+    case {name, call_args} do
+      {"puts", [arg]} -> remote_call(line, :"Elixir.Yup.Runtime", :puts, [arg])
+      {"map", [_, _]} -> remote_call(line, :"Elixir.Yup.Runtime", :map, call_args)
+      {"select", [_, _]} -> remote_call(line, :"Elixir.Yup.Runtime", :select, call_args)
+      _ -> dispatch_call(name, call_args, line, function_names)
     end
   end
 
@@ -208,16 +139,18 @@ defmodule Yup.Compiler.Erlang do
     {:tuple, line(node), elements}
   end
 
-  defp expr(%RecordConstruction{name: _name, fields: fields} = node, function_names) do
+  defp expr(%RecordConstruction{name: _name, fields: fields} = node, function_names),
+    do: {:map, line(node), map_field_asts(fields, line(node), function_names)}
+
+  defp expr(%MapLiteral{fields: fields} = node, function_names),
+    do: {:map, line(node), map_field_asts(fields, line(node), function_names)}
+
+  defp expr(%ListLiteral{elements: elements} = node, function_names) do
     line = line(node)
 
-    field_asts =
-      Enum.map(fields, fn {field_name, value, _field_loc} ->
-        {:map_field_assoc, line, {:atom, line, String.to_atom(field_name)},
-         expr(value, function_names)}
-      end)
-
-    {:map, line, field_asts}
+    Enum.reduce(Enum.reverse(elements), {nil, line}, fn element, tail ->
+      {:cons, line, expr(element, function_names), tail}
+    end)
   end
 
   defp expr(%FieldAccess{record: record, field: field} = node, function_names) do
@@ -253,45 +186,6 @@ defmodule Yup.Compiler.Erlang do
     else
       {:call, line, var(name, line), call_args}
     end
-  end
-
-  # Only the arity is validated here: the fun argument may be any expression
-  # that evaluates to a function value (a literal block, a bound name, or a
-  # call result), matching how ordinary calls accept function values. Passing
-  # a non-function is a runtime error raised by the Yup.Runtime clauses.
-  defp validate_collection_call!(name, receiver, arg_nodes, node) do
-    total = length(arg_nodes) + if(receiver, do: 1, else: 0)
-
-    case @collection_ops[name] do
-      :fun ->
-        unless total == 2,
-          do:
-            raise_source_error(
-              node,
-              "#{name} takes the collection and a function, like values.#{name} { |value| value * 2 }"
-            )
-
-      :reduce ->
-        unless total in 2..3,
-          do:
-            raise_source_error(
-              node,
-              "#{name} takes the collection, an optional initial value, and a function, like values.#{name}(0) { |sum, value| sum + value }"
-            )
-
-      :unary ->
-        unless total == 1,
-          do: raise_source_error(node, "#{name} takes the collection as its only argument")
-    end
-  end
-
-  defp raise_source_error(node, message) do
-    raise %SourceError{
-      path: Process.get(:yup_source_path),
-      line: line(node),
-      column: column(node),
-      message: message
-    }
   end
 
   defp runtime_for("+"), do: :add
@@ -368,26 +262,12 @@ defmodule Yup.Compiler.Erlang do
     %{node | operand: rename_in_node(operand, mapping)}
   end
 
-  defp rename_in_node(%Call{args: args, receiver: receiver, block: block} = node, mapping) do
+  defp rename_in_node(%Call{args: args, receiver: receiver} = node, mapping) do
     %{
       node
       | args: Enum.map(args, &rename_in_node(&1, mapping)),
-        receiver: receiver && rename_in_node(receiver, mapping),
-        block: block && rename_in_node(block, mapping)
+        receiver: receiver && rename_in_node(receiver, mapping)
     }
-  end
-
-  defp rename_in_node(%ListLiteral{elements: elements} = node, mapping) do
-    %{node | elements: Enum.map(elements, &rename_in_node(&1, mapping))}
-  end
-
-  defp rename_in_node(%MapLiteral{entries: entries} = node, mapping) do
-    renamed =
-      Enum.map(entries, fn {key, value, entry_loc} ->
-        {key, rename_in_node(value, mapping), entry_loc}
-      end)
-
-    %{node | entries: renamed}
   end
 
   defp rename_in_node(%Constructor{args: args} = node, mapping) do
@@ -399,12 +279,15 @@ defmodule Yup.Compiler.Erlang do
   end
 
   defp rename_in_node(%RecordConstruction{fields: fields} = node, mapping) do
-    renamed =
-      Enum.map(fields, fn {name, value, field_loc} ->
-        {name, rename_in_node(value, mapping), field_loc}
-      end)
+    %{node | fields: rename_in_fields(fields, mapping)}
+  end
 
-    %{node | fields: renamed}
+  defp rename_in_node(%MapLiteral{fields: fields} = node, mapping) do
+    %{node | fields: rename_in_fields(fields, mapping)}
+  end
+
+  defp rename_in_node(%ListLiteral{elements: elements} = node, mapping) do
+    %{node | elements: Enum.map(elements, &rename_in_node(&1, mapping))}
   end
 
   defp rename_in_node(%Binding{value: value} = node, mapping) do
@@ -428,6 +311,19 @@ defmodule Yup.Compiler.Erlang do
 
   defp rename_in_clause(%MatchClause{pattern: _pattern, body: body} = clause, mapping) do
     %{clause | body: rename_in_body(body, mapping)}
+  end
+
+  defp rename_in_fields(fields, mapping) do
+    Enum.map(fields, fn {name, value, field_loc} ->
+      {name, rename_in_node(value, mapping), field_loc}
+    end)
+  end
+
+  defp map_field_asts(fields, line, function_names) do
+    Enum.map(fields, fn {field_name, value, _field_loc} ->
+      {:map_field_assoc, line, {:atom, line, String.to_atom(field_name)},
+       expr(value, function_names)}
+    end)
   end
 
   defp remote_call(line, module, function, args) do
@@ -511,18 +407,9 @@ defmodule Yup.Compiler.Erlang do
   defp check_node(%UnaryOp{operand: operand}, declarations, path),
     do: check_node(operand, declarations, path)
 
-  defp check_node(%Call{args: args, receiver: receiver, block: block}, declarations, path) do
+  defp check_node(%Call{args: args, receiver: receiver}, declarations, path) do
     if receiver, do: check_node(receiver, declarations, path)
-    if block, do: check_node(block, declarations, path)
     Enum.each(args, fn arg -> check_node(arg, declarations, path) end)
-  end
-
-  defp check_node(%ListLiteral{elements: elements}, declarations, path) do
-    Enum.each(elements, fn element -> check_node(element, declarations, path) end)
-  end
-
-  defp check_node(%MapLiteral{entries: entries}, declarations, path) do
-    Enum.each(entries, fn {_key, value, _loc} -> check_node(value, declarations, path) end)
   end
 
   defp check_node(%Constructor{args: args}, declarations, path) do
@@ -536,6 +423,18 @@ defmodule Yup.Compiler.Erlang do
     validate_record(node, declarations, path)
 
     Enum.each(fields, fn {_name, value, _loc} -> check_node(value, declarations, path) end)
+  end
+
+  defp check_node(%MapLiteral{fields: fields}, declarations, path) do
+    validate_no_duplicate_fields!(fields, path, fn dup_name ->
+      "duplicate key #{dup_name} in map literal"
+    end)
+
+    Enum.each(fields, fn {_name, value, _loc} -> check_node(value, declarations, path) end)
+  end
+
+  defp check_node(%ListLiteral{elements: elements}, declarations, path) do
+    Enum.each(elements, fn element -> check_node(element, declarations, path) end)
   end
 
   defp check_node(_node, _declarations, _path), do: :ok
@@ -555,49 +454,64 @@ defmodule Yup.Compiler.Erlang do
         }
 
       {:ok, %{fields: declared_fields}} ->
-        result =
-          Enum.reduce_while(fields, MapSet.new(), fn {n, _v, loc}, seen ->
-            if MapSet.member?(seen, n),
-              do: {:halt, {:dup, n, loc}},
-              else: {:cont, MapSet.put(seen, n)}
+        provided =
+          validate_no_duplicate_fields!(fields, path, fn dup_name ->
+            "duplicate field #{dup_name} in record #{name} construction"
           end)
 
-        case result do
-          {:dup, dup_name, dup_loc} ->
+        case MapSet.difference(provided, declared_fields) |> Enum.take(1) do
+          [unknown | _] ->
+            {_, _, field_loc} = Enum.find(fields, fn {n, _v, _l} -> n == unknown end)
+
             raise %SourceError{
               path: path,
-              line: dup_loc.line,
-              column: dup_loc.column,
-              message: "duplicate field #{dup_name} in record #{name} construction"
+              line: field_loc.line,
+              column: field_loc.column,
+              message: "record #{name} has no field #{unknown}"
             }
 
-          provided ->
-            case MapSet.difference(provided, declared_fields) |> Enum.take(1) do
-              [unknown | _] ->
-                {_, _, field_loc} = Enum.find(fields, fn {n, _v, _l} -> n == unknown end)
-
+          [] ->
+            case MapSet.difference(declared_fields, provided) |> Enum.take(1) do
+              [missing | _] ->
                 raise %SourceError{
                   path: path,
-                  line: field_loc.line,
-                  column: field_loc.column,
-                  message: "record #{name} has no field #{unknown}"
+                  line: loc.line,
+                  column: loc.column,
+                  message: "record #{name} is missing field #{missing}"
                 }
 
               [] ->
-                case MapSet.difference(declared_fields, provided) |> Enum.take(1) do
-                  [missing | _] ->
-                    raise %SourceError{
-                      path: path,
-                      line: loc.line,
-                      column: loc.column,
-                      message: "record #{name} is missing field #{missing}"
-                    }
-
-                  [] ->
-                    :ok
-                end
+                :ok
             end
         end
+    end
+  end
+
+  defp validate_no_duplicate_fields!(fields, path, message_fn) do
+    case find_duplicate_field(fields) do
+      {:dup, name, loc} ->
+        raise %SourceError{
+          path: path,
+          line: loc.line,
+          column: loc.column,
+          message: message_fn.(name)
+        }
+
+      {:ok, provided} ->
+        provided
+    end
+  end
+
+  defp find_duplicate_field(fields) do
+    fields
+    |> Enum.reduce_while(MapSet.new(), fn {n, _v, loc}, seen ->
+      if MapSet.member?(seen, n),
+        do: {:halt, {:dup, n, loc}},
+        else: {:cont, MapSet.put(seen, n)}
+    end)
+    |> case do
+      {:dup, _, _} = dup -> dup
+      provided -> {:ok, provided}
     end
   end
 

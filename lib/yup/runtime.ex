@@ -22,46 +22,51 @@ defmodule Yup.Runtime do
   def or_op(left, right), do: truthy?(left) or truthy?(right)
   def not_op(value), do: not truthy?(value)
 
-  def puts(value) when is_list(value) or is_map(value) do
-    IO.puts(inspect(value, charlists: :as_list))
-    :ok
-  end
-
   def puts(value) do
-    IO.puts(value)
+    value |> display() |> IO.puts()
     :ok
   end
-
-  # ── immutable collection operations ─────────────────────────────────
-  # Every operation returns a new value; the input collection is never
-  # mutated (BEAM lists and maps are structurally immutable anyway).
 
   def map(list, fun) when is_list(list), do: Enum.map(list, fun)
+  def select(list, fun) when is_list(list), do: Enum.filter(list, fun)
 
-  def select(list, fun) when is_list(list) do
-    Enum.filter(list, fn element -> truthy?(fun.(element)) end)
+  # Lists and maps print as `[1, 2, 3]` / `{name: "Ada"}` rather than going
+  # through IO.puts's charlist/Chars heuristics directly, since a YupYup list
+  # of integers is otherwise indistinguishable from an Erlang charlist. Map
+  # keys are sorted for deterministic output since BEAM map iteration order
+  # is not insertion order.
+  defp display(nil), do: "nil"
+
+  defp display(value) when is_list(value) do
+    "[" <> Enum.map_join(value, ", ", &nested_display/1) <> "]"
   end
 
-  def each(list, fun) when is_list(list) do
-    Enum.each(list, fun)
-    list
+  defp display(value) when is_map(value) do
+    fields =
+      value
+      |> Map.to_list()
+      |> Enum.sort_by(fn {key, _value} -> key end)
+      |> Enum.map_join(", ", fn {key, val} -> "#{key}: #{nested_display(val)}" end)
+
+    "{" <> fields <> "}"
   end
 
-  # Ruby-shaped reduce: the block receives (memo, element) and, without an
-  # explicit initial value, the first element seeds the memo.
-  def reduce([first | rest], fun), do: do_reduce(rest, first, fun)
-  def reduce([], _fun), do: nil
-  def reduce(list, initial, fun) when is_list(list), do: do_reduce(list, initial, fun)
-
-  def length(value) when is_list(value), do: :erlang.length(value)
-  def length(value) when is_map(value), do: map_size(value)
-
-  def keys(map) when is_map(map), do: Map.keys(map)
-  def values(map) when is_map(map), do: Map.values(map)
-
-  defp do_reduce(list, initial, fun) do
-    Enum.reduce(list, initial, fn element, memo -> fun.(memo, element) end)
+  # Constructor values are tagged tuples and String.Chars has no tuple
+  # implementation, so they print in their YupYup source shape, `Ok(1)`.
+  # Payloads use the nested rules so strings inside stay quoted.
+  defp display(value) when is_tuple(value) do
+    [tag | args] = Tuple.to_list(value)
+    Atom.to_string(tag) <> "(" <> Enum.map_join(args, ", ", &nested_display/1) <> ")"
   end
+
+  # Function values have no String.Chars implementation either; print their
+  # opaque inspect form rather than crashing.
+  defp display(value) when is_function(value), do: inspect(value)
+
+  defp display(value), do: to_string(value)
+
+  defp nested_display(value) when is_binary(value), do: inspect(value)
+  defp nested_display(value), do: display(value)
 
   defp truthy?(value) when value in [nil, false], do: false
   defp truthy?(_value), do: true

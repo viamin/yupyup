@@ -1,12 +1,12 @@
 defmodule Yup.AST.MapLiteral do
   @moduledoc """
-  An immutable map literal, e.g. `{ name: "Ada", active: true }`.
+  An immutable, untyped map literal, e.g. `{ name: "Ada", active: true }`.
 
-  Entries are `key: value` pairs whose keys are bare identifiers; keys lower
-  to BEAM atoms, matching the record representation so dot field access like
-  `user.name` works uniformly. Maps lower to BEAM maps and are immutable:
-  operations never mutate the original value.
+  A `MapLiteral` is the dynamic counterpart to a `Yup.AST.RecordConstruction`:
+  it builds a map value without a declared `record` type. `fields` holds
+  `{name, value, loc}` triples, matching `RecordConstruction.fields`, so
+  lowering and field access share the same shape as records.
   """
 
-  defstruct entries: [], loc: nil
+  defstruct fields: [], loc: nil
 end

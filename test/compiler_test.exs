@@ -880,152 +880,6 @@ defmodule Yup.CompilerTest do
     assert output == "Boston!\n"
   end
 
-  # ── immutable collection operations ─────────────────────────────────
-
-  test "collection operations accept a function value in place of a block" do
-    source = """
-    double = { |x| x * 2 }
-    values = [1, 2, 3]
-    puts values.map(double)
-    puts map(values, double)
-    """
-
-    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
-
-    output =
-      capture_io(fn ->
-        assert {:ok, module} = Yup.Compiler.compile(program)
-        assert {:ok, :ok} = Yup.Compiler.run(module)
-      end)
-
-    assert output == "[2, 4, 6]\n[2, 4, 6]\n"
-  end
-
-  test "select, each, and reduce accept function values" do
-    source = """
-    values = [1, 2, 3]
-    bigger = { |value| value > 1 }
-    puts values.select(bigger)
-
-    show = { |value| puts value }
-    values.each(show)
-
-    add = { |sum, value| sum + value }
-    puts values.reduce(0, add)
-    puts values.reduce(add)
-    """
-
-    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
-
-    output =
-      capture_io(fn ->
-        assert {:ok, module} = Yup.Compiler.compile(program)
-        assert {:ok, :ok} = Yup.Compiler.run(module)
-      end)
-
-    assert output == "[2, 3]\n1\n2\n3\n6\n6\n"
-  end
-
-  test "collection operations accept a function returned from a call" do
-    source = """
-    def doubler()
-      { |x| x * 2 }
-    end
-
-    values = [1, 2, 3]
-    puts values.map(doubler())
-    """
-
-    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
-
-    output =
-      capture_io(fn ->
-        assert {:ok, module} = Yup.Compiler.compile(program)
-        assert {:ok, :ok} = Yup.Compiler.run(module)
-      end)
-
-    assert output == "[2, 4, 6]\n"
-  end
-
-  test "rejects map without a function argument" do
-    source = """
-    values = [1, 2, 3]
-    puts values.map()
-    """
-
-    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
-
-    assert_raise Yup.SourceError, ~r/map takes the collection and a function/, fn ->
-      Yup.Compiler.Erlang.lower(program)
-    end
-  end
-
-  test "rejects length with extra arguments" do
-    source = """
-    values = [1, 2, 3]
-    puts values.length(1)
-    """
-
-    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
-
-    assert_raise Yup.SourceError, ~r/length takes the collection as its only argument/, fn ->
-      Yup.Compiler.Erlang.lower(program)
-    end
-  end
-
-  test "collection operations never mutate the original list" do
-    source = """
-    values = [1, 2, 3]
-    doubled = values.map { |value| value * 2 }
-    big = values.select { |value| value > 1 }
-    values.each { |value| puts value }
-    puts doubled
-    puts big
-    puts values
-    """
-
-    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
-
-    output =
-      capture_io(fn ->
-        assert {:ok, module} = Yup.Compiler.compile(program)
-        assert {:ok, :ok} = Yup.Compiler.run(module)
-      end)
-
-    assert output == "1\n2\n3\n[2, 4, 6]\n[2, 3]\n[1, 2, 3]\n"
-  end
-
-  test "reduce on an empty list without an initial value returns nil" do
-    source = """
-    values = []
-    puts values.reduce { |sum, value| sum + value }
-    """
-
-    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
-
-    output =
-      capture_io(fn ->
-        assert {:ok, module} = Yup.Compiler.compile(program)
-        assert {:ok, :ok} = Yup.Compiler.run(module)
-      end)
-
-    assert output == "\n"
-  end
-
-  test "map on a map raises a runtime FunctionClauseError instead of a source error" do
-    source = """
-    user = { name: "Ada" }
-    puts user.map { |entry| entry }
-    """
-
-    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
-    assert {:ok, module} = Yup.Compiler.compile(program)
-
-    assert_raise FunctionClauseError, fn ->
-      Yup.Compiler.run(module)
-    end
-  end
-
   test "compiles program with models alongside executable code" do
     source = """
     model Light
@@ -1210,5 +1064,327 @@ defmodule Yup.CompilerTest do
 
     assert annotated_output == unannotated_output
     assert annotated_output == "7\n"
+  end
+
+  # ── immutable collections (issue #4) ────────────────────────────────
+
+  test "executes a list literal and prints its elements" do
+    assert {:ok, program} = Yup.Parser.parse("puts [1, 2, 3]", path: "list.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[1, 2, 3]\n"
+  end
+
+  test "executes an empty list literal" do
+    assert {:ok, program} = Yup.Parser.parse("puts []", path: "list.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[]\n"
+  end
+
+  test "executes a nested list literal" do
+    assert {:ok, program} = Yup.Parser.parse("puts [1, [2, 3]]", path: "list.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[1, [2, 3]]\n"
+  end
+
+  test "executes a list literal containing strings with quoted display" do
+    assert {:ok, program} = Yup.Parser.parse(~s(puts ["a", "b"]), path: "list.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == ~s(["a", "b"]\n)
+  end
+
+  test "prints nil list elements distinctly from an empty list" do
+    assert {:ok, program} = Yup.Parser.parse("puts [nil, false]", path: "list.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[nil, false]\n"
+  end
+
+  test "prints nil map values distinctly from an absent value" do
+    assert {:ok, program} = Yup.Parser.parse("puts { a: nil }", path: "map.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "{a: nil}\n"
+  end
+
+  test "prints a top-level constructor value in source shape" do
+    assert {:ok, program} = Yup.Parser.parse("puts Ok(1)", path: "ctor.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "Ok(1)\n"
+  end
+
+  test "prints constructor values nested in a list with quoted string payloads" do
+    source = """
+    puts [Ok(1), Error("nope")]
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "ctor.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == ~s{[Ok(1), Error("nope")]\n}
+  end
+
+  test "prints a function value in opaque form instead of crashing" do
+    source = """
+    double = { |x| x * 2 }
+    puts double
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "fn.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output =~ "#Function<"
+  end
+
+  test "executes a map literal and reads fields via dot syntax" do
+    source = """
+    user = { name: "Ada", active: true }
+    puts user.name
+    puts user.active
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "map.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "Ada\ntrue\n"
+  end
+
+  test "executes an empty map literal" do
+    assert {:ok, program} = Yup.Parser.parse("puts {}", path: "map.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "{}\n"
+  end
+
+  test "prints a map literal with keys in sorted order" do
+    assert {:ok, program} = Yup.Parser.parse("puts { b: 2, a: 1 }", path: "map.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "{a: 1, b: 2}\n"
+  end
+
+  test "executes map with a block-driven operation over a list" do
+    source = """
+    values = [1, 2, 3]
+    doubled = values.map { |value| value * 2 }
+    puts doubled
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[2, 4, 6]\n"
+  end
+
+  test "executes select with a block-driven predicate over a list" do
+    source = """
+    values = [1, 2, 3, 4]
+    evens = values.select { |value| value / 2 * 2 == value }
+    puts evens
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[2, 4]\n"
+  end
+
+  test "map does not mutate the original list" do
+    source = """
+    values = [1, 2, 3]
+    doubled = values.map { |value| value * 2 }
+    puts values
+    puts doubled
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[1, 2, 3]\n[2, 4, 6]\n"
+  end
+
+  test "select does not mutate the original list" do
+    source = """
+    values = [1, 2, 3, 4]
+    evens = values.select { |value| value / 2 * 2 == value }
+    puts values
+    puts evens
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[1, 2, 3, 4]\n[2, 4]\n"
+  end
+
+  test "map and select compose via dot-call chaining" do
+    source = """
+    values = [1, 2, 3, 4, 5]
+    result = values.select { |value| value / 2 * 2 == value }.map { |value| value * 10 }
+    puts result
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[20, 40]\n"
+  end
+
+  test "map also works as a plain call passing the list first" do
+    source = """
+    values = [1, 2, 3]
+    puts map(values, { |value| value * 2 })
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "[2, 4, 6]\n"
+  end
+
+  test "rejects a map literal with a duplicate key" do
+    source = """
+    user = { name: "Ada", name: "Grace" }
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "map.yup")
+
+    assert_raise Yup.SourceError, ~r/duplicate key name in map literal/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "rejects defining a top-level function with the reserved map name" do
+    source = """
+    def map(x)
+      x
+    end
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    assert_raise Yup.SourceError, ~r/cannot define function with reserved name map/, fn ->
+      Yup.Compiler.Erlang.lower(program)
+    end
+  end
+
+  test "raises at runtime when calling map on a non-list value" do
+    source = """
+    user = { name: "Ada" }
+    puts user.map { |value| value }
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+    assert {:ok, module} = Yup.Compiler.compile(program)
+
+    assert_raise FunctionClauseError, fn ->
+      capture_io(fn -> Yup.Compiler.run(module) end)
+    end
+  end
+
+  test "rejects calling an unimplemented collection operation" do
+    source = """
+    values = [1, 2, 3]
+    puts values.reduce { |acc, value| acc + value }
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    assert {:error, message} = Yup.Compiler.compile(program)
+    assert message =~ "unbound_var"
   end
 end

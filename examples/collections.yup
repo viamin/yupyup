@@ -1,28 +1,13 @@
 values = [1, 2, 3]
-user = { name: "Ada", active: true }
 
 doubled = values.map { |value| value * 2 }
 puts doubled
 
-big = values.select { |value| value > 1 }
-puts big
+evens = values.select { |value| value / 2 * 2 == value }
+puts evens
 
-total = values.reduce(0) { |sum, value| sum + value }
-puts total
-
-sum = values.reduce { |sum, value| sum + value }
-puts sum
-
-values.each { |value| puts value }
-
-puts values.length()
-puts user.length()
-puts user.keys()
-puts user.values()
-
-names = [{ name: "Ada" }, { name: "Grace" }].map { |person| person.name }
-puts names
-
-# Operations never mutate the original collection.
 puts values
+
+user = { name: "Ada", active: true }
 puts user.name
+puts user.active
