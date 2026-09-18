@@ -973,6 +973,59 @@ defmodule Yup.CompilerTest do
     end
   end
 
+  test "collection operations never mutate the original list" do
+    source = """
+    values = [1, 2, 3]
+    doubled = values.map { |value| value * 2 }
+    big = values.select { |value| value > 1 }
+    values.each { |value| puts value }
+    puts doubled
+    puts big
+    puts values
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "1\n2\n3\n[2, 4, 6]\n[2, 3]\n[1, 2, 3]\n"
+  end
+
+  test "reduce on an empty list without an initial value returns nil" do
+    source = """
+    values = []
+    puts values.reduce { |sum, value| sum + value }
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+
+    output =
+      capture_io(fn ->
+        assert {:ok, module} = Yup.Compiler.compile(program)
+        assert {:ok, :ok} = Yup.Compiler.run(module)
+      end)
+
+    assert output == "\n"
+  end
+
+  test "map on a map raises a runtime FunctionClauseError instead of a source error" do
+    source = """
+    user = { name: "Ada" }
+    puts user.map { |entry| entry }
+    """
+
+    assert {:ok, program} = Yup.Parser.parse(source, path: "collections.yup")
+    assert {:ok, module} = Yup.Compiler.compile(program)
+
+    assert_raise FunctionClauseError, fn ->
+      Yup.Compiler.run(module)
+    end
+  end
+
   test "compiles program with models alongside executable code" do
     source = """
     model Light

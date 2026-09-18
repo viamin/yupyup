@@ -1020,7 +1020,10 @@ defmodule Yup.Parser do
         node = %Call{name: name, args: args, receiver: expr, block: block, loc: loc(line, column)}
         parse_postfix_tail(node, after_block, path)
 
-      [%{type: :identifier, value: name, line: line, column: column}, %{type: :lbrace} = lbrace | after_lbrace] ->
+      [
+        %{type: :identifier, value: name, line: line, column: column},
+        %{type: :lbrace} = lbrace | after_lbrace
+      ] ->
         {block, after_block} = parse_function_literal(lbrace, after_lbrace, path)
         node = %Call{name: name, args: [], receiver: expr, block: block, loc: loc(line, column)}
         parse_postfix_tail(node, after_block, path)

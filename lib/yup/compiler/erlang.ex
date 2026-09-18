@@ -40,6 +40,18 @@ defmodule Yup.Compiler.Erlang do
   # operations take just the collection. The fun may be any expression that
   # evaluates to a function value — a literal block, a bound name, or a call
   # result — exactly like an ordinary function-value argument.
+  #
+  # Call resolution precedence for these names is: top-level `def` > `puts` >
+  # collection builtin > local binding (see the `expr(%Call{...})` cond
+  # below, and "Call Resolution Precedence" in docs/LANGUAGE.md). A plain
+  # call to one of these names always hits the builtin arm unless shadowed by
+  # a top-level `def`, even if a local variable of the same name is bound to
+  # a function value — e.g. `map = { |acc, x| acc + x }; map(0, 5)` still
+  # calls the builtin `map`, not the local binding. This is a deliberate,
+  # documented tradeoff rather than an oversight: reserving these names
+  # outright (like `puts`) would reject harmless data bindings such as
+  # `values = [1, 2, 3]`, which conflicts with a name in this map but is
+  # never called as a function.
   @collection_ops %{
     "map" => :fun,
     "select" => :fun,

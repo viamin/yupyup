@@ -12,8 +12,10 @@ defmodule Yup.ParserTest do
     FieldAccess,
     Function,
     Identifier,
+    ListLiteral,
     Literal,
     LiteralPattern,
+    MapLiteral,
     Match,
     MatchClause,
     Model,
@@ -1241,5 +1243,92 @@ defmodule Yup.ParserTest do
              Yup.Parser.parse("def f(x: string)\n  x\nend\n", path: "bad.yup")
 
     assert error.message =~ "invalid parameter"
+  end
+
+  # ── collections (issue #4) ──────────────────────────────────────────
+
+  test "parses a list literal" do
+    assert {:ok,
+            %Program{
+              body: [
+                %ListLiteral{
+                  elements: [
+                    %Literal{kind: :integer, value: 1},
+                    %Literal{kind: :integer, value: 2},
+                    %Literal{kind: :integer, value: 3}
+                  ],
+                  loc: %{line: 1, column: 1}
+                }
+              ]
+            }} = Yup.Parser.parse("[1, 2, 3]", path: "expr.yup")
+  end
+
+  test "parses an empty list literal" do
+    assert {:ok, %Program{body: [%ListLiteral{elements: []}]}} =
+             Yup.Parser.parse("[]", path: "expr.yup")
+  end
+
+  test "parses a map literal with identifier-shaped keys" do
+    assert {:ok,
+            %Program{
+              body: [
+                %MapLiteral{
+                  entries: [
+                    {"name", %Literal{kind: :string, value: "Ada"}, %{line: 1, column: 3}},
+                    {"active", %Literal{kind: :boolean, value: true}, %{line: 1, column: 16}}
+                  ],
+                  loc: %{line: 1, column: 1}
+                }
+              ]
+            }} = Yup.Parser.parse(~s({ name: "Ada", active: true }), path: "expr.yup")
+  end
+
+  test "disambiguates a block literal from a map literal by the leading pipe" do
+    assert {:ok, %Program{body: [%Binding{value: %AnonymousFunction{params: ["x"]}}]}} =
+             Yup.Parser.parse("double = { |x| x * 2 }", path: "expr.yup")
+
+    assert {:ok, %Program{body: [%Binding{value: %MapLiteral{entries: entries}}]}} =
+             Yup.Parser.parse(~s(point = { x: 1, y: 2 }), path: "expr.yup")
+
+    assert [{"x", _, _}, {"y", _, _}] = entries
+  end
+
+  test "parses a dot call with a trailing block as the call's block field" do
+    assert {:ok,
+            %Program{
+              body: [
+                %Call{
+                  name: "map",
+                  args: [],
+                  receiver: %Identifier{name: "values"},
+                  block: %AnonymousFunction{params: ["value"]}
+                }
+              ]
+            }} = Yup.Parser.parse("values.map { |value| value * 2 }", path: "expr.yup")
+  end
+
+  test "a dot call without a trailing block leaves the block field nil" do
+    assert {:ok, %Program{body: [%Call{name: "length", block: nil}]}} =
+             Yup.Parser.parse("values.length()", path: "expr.yup")
+  end
+
+  test "rejects a list literal missing its closing bracket" do
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse("[1, 2", path: "bad.yup")
+
+    assert error.message =~ "expected ] in list literal"
+  end
+
+  test "rejects a map literal with a missing value" do
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse("{ name: }", path: "bad.yup")
+
+    assert error.message =~ "unexpected token }"
+  end
+
+  test "rejects a map literal with a duplicate key" do
+    assert {:error, %Yup.SourceError{} = error} =
+             Yup.Parser.parse(~s({ name: 1, name: 2 }), path: "bad.yup")
+
+    assert error.message =~ "duplicate key name in map literal"
   end
 end

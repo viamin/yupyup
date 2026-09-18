@@ -230,6 +230,79 @@ of scope and are rejected with a source-located error, since actor
 references may eventually use different dot-call dispatch once actor
 semantics are designed; that dispatch remains unresolved.
 
+## Immutable Collections
+
+Lists and maps are immutable literal values:
+
+```yup
+values = [1, 2, 3]
+user = { name: "Ada", active: true }
+```
+
+A list literal is a comma-separated `[...]` element list; elements can be any
+expression. A map literal is a comma-separated `{ key: value, ... }` entry
+list; keys are bare identifiers (not arbitrary expressions) and lower to BEAM
+atoms, matching how record fields are represented, so `user.name` reads a map
+literal's `name` entry the same way it reads a record field. Duplicate keys
+in the same map literal are a compile error reported at the offending key's
+source location.
+
+A `{` starting an expression is disambiguated by what follows: `{ |params|
+... }` is an anonymous function literal (see [Implemented In The
+Bootstrap](#implemented-in-the-bootstrap)), and any other `{` starts a map
+literal.
+
+Lists and maps support a small set of builtin operations, called either as a
+dot call (`values.map { |value| value * 2 }`) or as a plain call
+(`map(values, { |value| value * 2 })`) — the receiver becomes the first
+argument either way, matching ordinary [dot-call
+semantics](#dot-calls-and-chaining). Every operation returns a new value; the
+input collection is never mutated.
+
+| Operation | Arity | Notes |
+| --- | --- | --- |
+| `map(collection, fun)` | 2 | Lists only. |
+| `select(collection, fun)` | 2 | Lists only; keeps elements where `fun` is truthy. |
+| `each(collection, fun)` | 2 | Lists only; runs `fun` for effect and returns the original list. |
+| `reduce(collection, fun)` | 2 | Lists only; the first element seeds the accumulator. Returns `nil` for an empty list. |
+| `reduce(collection, initial, fun)` | 3 | Lists only. |
+| `length(collection)` | 1 | Lists and maps. |
+| `keys(collection)` | 1 | Maps only. |
+| `values(collection)` | 1 | Maps only. |
+
+The arity table is enforced at compile time with a source-located
+`Yup.SourceError` (e.g. calling `map` with no function argument). Whether the
+`fun` argument is actually a function value is not checked at compile time —
+it may be a block literal, a bound name, or a call result, exactly like an
+ordinary function-value argument — so passing a non-function raises an
+ordinary BEAM runtime error. `map`, `select`, `each`, and `reduce` are
+list-only: calling them on a map is not rejected at compile time and instead
+fails with a raw BEAM `FunctionClauseError` at runtime, since `Yup.Runtime`
+only defines clauses for lists.
+
+### Call Resolution Precedence
+
+`map`, `select`, `each`, `reduce`, `length`, `keys`, and `values` are builtin
+names. A plain call to one of these names resolves in this order:
+
+1. A top-level `def` with the same name (a user definition shadows the
+   builtin entirely, for every call to that name in the program).
+2. `puts`, which always resolves to `Yup.Runtime.puts/1`.
+3. The collection builtin.
+4. A local binding called as a function value (the fallback used for any
+   other name).
+
+This means a top-level `def map(...)` makes every call to `map(...)` resolve
+to that definition instead of the builtin. But binding a local name that
+merely happens to share a builtin's name — e.g. `map = { |acc, x| acc + x }`
+— does not shadow the builtin for a plain call: `map(0, 5)` still resolves to
+the builtin (and fails its arity check, since `map` expects a collection and
+a function). Ordinary data bindings like `values = [1, 2, 3]` are unaffected
+by this precedence, since `values` is never called as a function there — the
+conflict only matters for a name that is both a builtin and is called
+plain-call-style (`name(...)`) rather than read as a value or used as a dot
+call receiver.
+
 ## Type Annotations
 
 YupYup parses type annotations as first-class syntax so future checkers can
@@ -292,7 +365,7 @@ intent available without a separate annotation sidecar.
 
 ## Current Limitations
 
-The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested blocks other than `def ... end`, `match ... end`, and `record ... end`, string interpolation, arrays, comments inside string literals, type-scoped methods, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors (including actor dot-call dispatch), full type checking, or verification constructs.
+The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The same line-oriented constraint applies to list and map literals: `[...]` and `{ key: value }` must each fit on one line, since the parser has no notion of a multiline literal continuing past its opening line. The parser does not support nested blocks other than `def ... end`, `match ... end`, and `record ... end`, string interpolation, comments inside string literals, type-scoped methods, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors (including actor dot-call dispatch), full type checking, or verification constructs.
 
 Type annotations are parsed and preserved on the AST but the bootstrap does
 not enforce them. See [Type Annotations](#type-annotations) above and the

@@ -51,6 +51,19 @@ defmodule Yup.CLITest do
     assert output =~ "Ada"
   end
 
+  test "runs collections example through built escript", %{yup: yup} do
+    assert {output, 0} =
+             System.cmd(yup, ["run", "examples/collections.yup"], stderr_to_stdout: true)
+
+    assert output =~ "[2, 4, 6]"
+    assert output =~ "[2, 3]"
+    assert output =~ "6\n6\n"
+    assert output =~ "[\"Ada\", \"Grace\"]"
+    # The original list is printed again at the end, proving the map/select/
+    # reduce/each calls above never mutated it.
+    assert output =~ "[1, 2, 3]"
+  end
+
   @tag :tmp_dir
   test "reports dot calls in model expressions as a source-located error", %{
     tmp_dir: tmp_dir,
