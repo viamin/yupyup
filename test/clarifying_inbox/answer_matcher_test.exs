@@ -49,6 +49,12 @@ defmodule Yup.ClarifyingInbox.AnswerMatcherTest do
     assert {:ok, [{2, _}, {3, _}]} = AnswerMatcher.match(@options, "both b and c")
   end
 
+  test "combined quoted indices match every referenced option" do
+    assert {:ok, [{1, _}, {2, _}]} = AnswerMatcher.match(@options, "\"A\" and \"B\"")
+    assert {:ok, [{1, _}, {2, _}]} = AnswerMatcher.match(@options, "'A', 'B'")
+    assert {:ok, [{1, _}, {2, _}]} = AnswerMatcher.match(@options, "\"1\" and \"2\"")
+  end
+
   test "a refined answer that only prefixes the label matches" do
     refined = "Built-in sanity checks, but only evaluation-level checks"
 
