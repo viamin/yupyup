@@ -53,6 +53,7 @@ defmodule Yup.ClarifyingInbox.AnswerMatcherTest do
     assert {:ok, [{1, _}, {2, _}]} = AnswerMatcher.match(@options, "\"A\" and \"B\"")
     assert {:ok, [{1, _}, {2, _}]} = AnswerMatcher.match(@options, "'A', 'B'")
     assert {:ok, [{1, _}, {2, _}]} = AnswerMatcher.match(@options, "\"1\" and \"2\"")
+    assert {:ok, [{1, _}, {2, _}]} = AnswerMatcher.match(@options, "both \"A\" and \"B\"")
   end
 
   test "a refined answer that only prefixes the label matches" do

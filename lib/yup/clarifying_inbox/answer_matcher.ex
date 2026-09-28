@@ -152,10 +152,14 @@ defmodule Yup.ClarifyingInbox.AnswerMatcher do
 
   defp strip_quotes(text) do
     cond do
-      text =~ @double_quoted -> String.slice(text, 1..-2//1)
-      text =~ @single_quoted -> String.slice(text, 1..-2//1)
+      wrapped_in_single_pair?(text, @double_quoted, "\"") -> String.slice(text, 1..-2//1)
+      wrapped_in_single_pair?(text, @single_quoted, "'") -> String.slice(text, 1..-2//1)
       true -> text
     end
+  end
+
+  defp wrapped_in_single_pair?(text, pattern, quote) do
+    text =~ pattern and length(String.split(text, quote)) == 3
   end
 
   defp strip_prefix(text) do
