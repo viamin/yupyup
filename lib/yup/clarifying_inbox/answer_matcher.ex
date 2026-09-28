@@ -58,7 +58,7 @@ defmodule Yup.ClarifyingInbox.AnswerMatcher do
         []
 
       segments ->
-        segments = Enum.map(segments, &String.trim(&1, ~s{"'}))
+        segments = Enum.map(segments, &normalize/1)
 
         if Enum.all?(segments, &segment_matches?(options, &1)) do
           Enum.flat_map(segments, &direct_matches(options, &1))
