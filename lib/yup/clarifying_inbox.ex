@@ -35,10 +35,14 @@ defmodule Yup.ClarifyingInbox do
          "got #{length(answers)} answers for only #{length(questions)} clarifying questions"
        )}
     else
-      {:ok,
-       questions
-       |> Enum.zip(answers)
-       |> Map.new(fn {question, answer} -> {question.number, answer} end)}
+      if Enum.all?(answers, &is_binary/1) do
+        {:ok,
+         questions
+         |> Enum.zip(answers)
+         |> Map.new(fn {question, answer} -> {question.number, answer} end)}
+      else
+        {:error, invalid("answers must be strings, got: #{inspect(answers)}")}
+      end
     end
   end
 

@@ -143,7 +143,6 @@ defmodule Yup.ClarifyingInboxTest do
     assert message =~ inspect(@sanity_checks)
     assert message =~ inspect(@explicit_assertions)
     assert message =~ inspect(@skip_checks)
-    # {inspect(@sanity_checks)})
     assert message =~ ~s((A)
   end
 
@@ -199,6 +198,11 @@ defmodule Yup.ClarifyingInboxTest do
              submit(questions, %{1 => :b})
 
     assert message =~ "must be a string, got: :b"
+
+    assert {:error, %{code: "invalid_arguments", message: message}} =
+             submit(questions, [:b])
+
+    assert message =~ "answers must be strings, got: [:b]"
 
     assert {:error, %{code: "invalid_arguments", message: message}} =
              submit(questions, %{"one" => "A"})
