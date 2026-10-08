@@ -25,16 +25,19 @@ the models forbid.
   full behavior, never proves the gluing relation, and claims nothing
   about unbounded traces — the same discipline `yup verify` applies to
   its own results. A pass means "these traces conformed"; nothing more.
-- **Two pieces: a generic engine in `lib`, the OAuth mapping in test
-  support.** `Yup.Verify.Trace` (new) knows models, events, and
-  disagreements; `Yup.OAuthTrace` (`test/support/oauth_trace.ex`, new)
-  knows OAuth: which runtime observation maps to which transition and
-  what the outcome claims about the abstract state. Keeping the
-  abstraction relation out of the language toolchain matches #22's
-  decision to keep OAuth knowledge in examples and tests; putting the
-  engine in `lib` keeps it a `Yup.Verify`-family primitive that docs can
-  point at. `mix.exs` gained `elixirc_paths/1` so `test/support` compiles
-  only under `:test`.
+- **Two pieces: a generic engine in `lib`, the OAuth mapping beside
+  it.** `Yup.Verify.Trace` (new) knows models, events, and
+  disagreements; `Yup.OAuthTrace` knows OAuth: which runtime
+  observation maps to which transition and what the outcome claims
+  about the abstract state. Keeping the abstraction relation out of the
+  language toolchain matches #22's decision to keep OAuth knowledge in
+  examples and tests; putting the engine in `lib` keeps it a
+  `Yup.Verify`-family primitive that docs can point at. The mapping
+  first lived in `test/support` (with an `elixirc_paths/1` override in
+  `mix.exs` so it compiled only under `:test`); #24's conformance
+  harness needs the same mapping, so it moved to
+  `lib/yup/oauth_trace.ex` — still tooling the compiler and verifier
+  never read — and the override went away.
 - **One model semantics.** Initial-state construction, transition
   application, and invariant evaluation were extracted from
   `Yup.Verify.Explorer` into `Yup.Verify.Semantics` (new), and the
@@ -119,7 +122,8 @@ lib/yup/verify/semantics.ex  Yup.Verify.Semantics  initial_state/2, transition_e
                             apply/3, check_invariants/3 (extracted from Explorer)
 lib/yup/verify/trace.ex      Yup.Verify.Trace      new/2, event/2, state/2, states/1, labels/1
 lib/yup/verify/explorer.ex   now steps through Yup.Verify.Semantics (no behavior change)
-test/support/oauth_trace.ex  Yup.OAuthTrace        issue/1, redeem/5 — the explicit mapping
+lib/yup/oauth_trace.ex          Yup.OAuthTrace        issue/1, redeem/5 — the explicit mapping
+                                                      (moved from test/support by #24)
 examples/broken_oauth_runtime.yup              the deliberately bad runtime fixture
 test/verify/trace_test.exs                     engine tests
 test/oauth_trace_test.exs                      mapping, conformance, disagreement tests

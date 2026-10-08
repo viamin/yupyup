@@ -5,9 +5,11 @@ defmodule Yup.OAuthTrace do
 
   This is the abstraction relation of the trace check: which model
   transitions a runtime observation maps to, and what the runtime's
-  outcome claims about the models' abstract state afterwards. It lives in
-  test support because it is a test-time artifact, not part of the
-  language; `Yup.Verify.Trace` is the generic engine it feeds.
+  outcome claims about the models' abstract state afterwards. It lives
+  in `lib` (moved out of test support by the #24 conformance harness,
+  which reuses it) but is still tooling rather than part of the
+  language: the compiler and verifier never read it;
+  `Yup.Verify.Trace` is the generic engine it feeds.
 
   ## Event mapping
 

@@ -652,8 +652,11 @@ and permanent for this example:
 - HTTP, persistence, expiry, scopes, or randomness — codes and tokens are
   deterministic (`ac-<client_id>`, `at-<code>`), and the single grant slot
   means a second authorization overwrites the first.
-- External conformance suite integration; error results are reason
-  strings, not OAuth 2.0 error codes.
+- External conformance suite integration at the runtime level — the toy
+  keeps no HTTP and speaks reason strings, not OAuth 2.0 error codes;
+  the [interoperability harness](#oauth-interoperability-harness)
+  below documents exactly what an external suite can and cannot check
+  against it.
 
 ### Trace Checking The Runtime Against The Models
 
@@ -661,8 +664,10 @@ The test suite connects this runtime back to the verified models with a
 trace check: each runtime observation is mapped to model transitions and
 the models are stepped through them, so a runtime that permits behavior
 the models forbid fails the suite. `Yup.Verify.Trace` is the generic
-engine; the OAuth-specific mapping lives in `test/support/oauth_trace.ex`
-(`Yup.OAuthTrace`), and `test/oauth_trace_test.exs` drives it.
+engine; the OAuth-specific mapping lives in `lib/yup/oauth_trace.ex`
+(`Yup.OAuthTrace`), `test/oauth_trace_test.exs` drives it, and the
+[interoperability harness](#oauth-interoperability-harness) below
+reuses the same mapping.
 
 The event mapping, stated once:
 
@@ -711,6 +716,126 @@ traces the tests feed it, the gluing relation (the mapping and its
 claims) is supplied rather than proved, and it sees only what the models
 model — client registration and redirect URIs are invisible to it and
 remain covered by the runtime's own tests.
+
+## OAuth Interoperability Harness
+
+`bin/oauth-conformance` is the documented, repeatable path for running
+the OAuth runtime example against external conformance expectations
+(issue #24): an interoperability harness, not certification. The
+candidate external tooling — the [OpenID Foundation Conformance
+Suite](https://gitlab.com/openid/conformance-suite) and its hosted entry
+point at <https://www.certification.openid.net/> — drives a deployed
+HTTPS provider end to end through a browser, and
+`examples/oauth_runtime.yup` deliberately has no HTTP (see its
+non-goals above), so the suite cannot run against the toy wholesale.
+Where the supported subset fits, this harness runs it, and where it
+does not, the harness says so:
+
+```sh
+bin/oauth-conformance                                     # local manifest, good runtime
+bin/oauth-conformance examples/broken_oauth_runtime.yup  # the failing demo
+YUP_OIDF_SUITE='https://www.certification.openid.net' bin/oauth-conformance
+YUP_OIDF_SUITE=/path/to/conformance-suite bin/oauth-conformance
+```
+
+Every case lives in one manifest, `Yup.Conformance.OAuth.Cases`, and
+names one protocol behavior an external suite's test exercises,
+anchored to its normative RFC section. Each supported case is replayed
+against the compiled runtime in protocol shape — authorization requests
+(`client_id`, `redirect_uri`, the derived challenge) and token requests
+(`code`, `redirect_uri`, `verifier`), exactly the two endpoint shapes
+such a suite drives. A case passes only when **two independent layers
+agree**:
+
+1. the RFC-derived expectation about the outcome — the RFC text is the
+   outside statement of the protocol, authored independently of both
+   the runtime and the verifier, the role TLC plays for the models in
+   the cross-check above;
+2. conformance with the verified models — every step of every case is
+   mapped through `Yup.OAuthTrace` and checked against `AuthCode` and
+   `PkceExchange` by `Yup.Verify.Trace`, exactly like
+   [the trace check above](#trace-checking-the-runtime-against-the-models).
+
+That second layer ties each conformance result back to the verified
+model/runtime trace-checking story: a runtime that drifts from the
+models fails the harness even if it satisfies the RFC cases, and a
+runtime that satisfies the models but breaks an RFC rule fails too.
+`bin/oauth-conformance examples/broken_oauth_runtime.yup` is the
+falsifiable demo: its mints fail `token-exchange-wrong-verifier`,
+`authorization-code-single-use`, `token-endpoint-redirect-binding`, and
+`token-unknown-code-refused` at the protocol layer, and the first two
+of those also disagree with the models.
+
+### The case manifest
+
+Supported — replayed against the runtime:
+
+| Case | Behavior | Source |
+| ---- | -------- | ------ |
+| `authorization-code-issued` | issues a code for the registered client, storing only the derived challenge | RFC 6749 §4.1.2; RFC 7636 §4.4.1 |
+| `authorization-redirect-exact-match` | refuses a redirect uri other than the registered one | RFC 6749 §3.1.2.3 |
+| `authorization-unregistered-client` | refuses an unregistered client id | RFC 6749 §4.1.2.1 |
+| `token-exchange-valid-verifier` | exchanges the code for a token when the verifier derives to the stored challenge | RFC 7636 §4.6 |
+| `token-exchange-wrong-verifier` | refuses a verifier that does not derive to the stored challenge, without consuming the code | RFC 7636 §4.6 |
+| `authorization-code-single-use` | refuses a replay of an already-redeemed code | RFC 6749 §4.1.2 |
+| `token-endpoint-redirect-binding` | refuses redemption at a redirect uri other than the one the code was issued for | RFC 6749 §4.1.3 |
+| `token-unknown-code-refused` | refuses a code that was never issued | RFC 6749 §5.2 (invalid_grant) |
+
+Documented as unsupported — the honest expected-failure list:
+
+| Case | Behavior | Source | Why it cannot run here |
+| ---- | -------- | ------ | --------------------- |
+| `provider-metadata-discovery` | well-known provider metadata discovery | OIDC Discovery | the suite starts from /.well-known/openid-configuration; the runtime is an in-process function slice with no HTTP, so there is no URL to fetch |
+| `oidc-id-token` | openid connect id token issuance | OIDC Core | no OpenID Connect layer: opaque access tokens only, no signing keys, no ID token claims |
+| `pkce-s256-test-vectors` | pkce s256 verification vectors | RFC 7636 App. B | derive/1 is the deliberate s256: + verifier abstraction, exactly as the model abstracts the hash; real BASE64URL(SHA256(...)) is out of scope |
+| `token-response-error-codes` | token endpoint error codes | RFC 6749 §5.2 | refusals are reason strings, not OAuth 2.0 error codes; this is an expected failure against any real suite |
+| `token-expiry-and-refresh` | token expiry and refresh tokens | RFC 6749 §4.2.2, §6 | tokens never expire and refresh tokens do not exist |
+| `client-authentication` | client authentication at the token endpoint | RFC 6749 §2.3.1 | the one registered client has no secret; the token endpoint never authenticates a client |
+| `scope-handling-and-consent` | scope handling and consent | RFC 6749 §3.3 | no scopes, no consent step, no resource indicators anywhere in the grant |
+| `https-and-tls-profile` | https endpoints and tls profile | suite baseline | nothing listens on any port; there is no TLS to profile |
+| `fapi-security-profile` | fapi security profile conformance | FAPI 1.0/2.0 | FAPI profiles require signed request objects and mTLS or private_key_jwt; the toy implements none of it |
+| `dynamic-client-registration` | dynamic client registration | RFC 7591 | one fixed registration in source; there is no registration endpoint |
+
+A test fails if this table and the manifest drift apart, so the
+documentation cannot quietly claim support the harness does not have.
+
+### The external suite path
+
+The suite itself stays an optional, manual check: it is too heavy for
+this toy's default CI because it needs a deployed provider over HTTPS
+and a browser-mediated authorization. The reproducible developer path:
+
+1. Stand up (or open) a suite: the hosted entry point at
+   <https://www.certification.openid.net/>, or a local deployment from
+   the [conformance-suite repository](https://gitlab.com/openid/conformance-suite)
+   (`docker compose up` from a checkout; that repository's README
+   documents the exact invocation and ports).
+2. Point the harness at it and read the hand-off:
+   `YUP_OIDF_SUITE=<url-or-checkout> bin/oauth-conformance` verifies
+   the models, runs the local manifest, and writes `plan.json` into
+   the work directory the report names. The plan records the suite
+   target (a checkout is pinned by absolute path and git commit when
+   available), the deployment shape a suite-compatible deployment of
+   this runtime would need — the authorization/token request shapes,
+   the one registered client and redirect URI, the `authorization_code`
+   grant with the abstracted S256 challenge — and the full
+   supported/unsupported case list with reasons. Its output is
+   byte-stable, so a suite commit plus the plan bytes are pinned
+   evidence of what was run.
+3. What a real suite run could ever check against this runtime is the
+   supported table above — nothing else. There is no HTTP adapter and
+   none is planned: wiring the in-process functions to TLS endpoints,
+   discovery documents, and a browser consent page is exactly the
+   production server work the toy's non-goals exclude, and
+   `token-response-error-codes` is the honest expected failure of any
+   such attempt.
+
+Without `YUP_OIDF_SUITE` the harness prints that the external suite is
+not configured, writes no plan, and still runs the local manifest; the
+`mix test` suite covers the same manifest through
+`test/conformance/oauth_test.exs`, so CI passes with or without an
+external install. A `YUP_OIDF_SUITE` path that does not exist is a
+configuration error, not a skip, and exits nonzero.
 
 ## Proposed And Unresolved
 
