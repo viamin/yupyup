@@ -103,7 +103,8 @@ defmodule Yup.Conformance.OAuth do
   directory), `:suite` (default `:not_configured`; pass a map shaped
   like `find_suite/1`'s `{:ok, _}` value), `:probe` (a 1-arity
   function used to verify that a `:url` suite is reachable — defaults
-  to a HEAD request; tests inject a probe to avoid real HTTP calls).
+  to a HEAD request), and `:command_runner` (the 3-arity command
+  runner used by that default probe; tests inject it to avoid HTTP).
   """
   # @spec OAUTH-CF-2
   # @spec OAUTH-CF-5
@@ -111,7 +112,8 @@ defmodule Yup.Conformance.OAuth do
   def run(opts \\ []) do
     runtime_file = Keyword.get(opts, :runtime_file, @default_runtime)
     work_dir = Keyword.get_lazy(opts, :work_dir, &fresh_work_dir/0)
-    probe = Keyword.get(opts, :probe, &default_probe/1)
+    command_runner = Keyword.get(opts, :command_runner, &System.cmd/3)
+    probe = Keyword.get(opts, :probe, &default_probe(&1, command_runner))
     File.mkdir_p!(work_dir)
 
     results = %{
@@ -446,8 +448,8 @@ defmodule Yup.Conformance.OAuth do
   # exact failure mode does not matter, only that the suite can be
   # talked to and answers success. Missing curl is also unreachable,
   # since the harness has no other way to verify the deployment.
-  defp default_probe(url) do
-    case System.cmd(
+  defp default_probe(url, command_runner) do
+    case command_runner.(
            "curl",
            ["--silent", "--fail", "--head", "--max-time", "5", url],
            stderr_to_stdout: true

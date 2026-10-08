@@ -100,8 +100,8 @@ entries carry non-empty reasons, and every id and title appears in the
 `find_suite/1` classification and the unset/blank skip; the good
 runtime passing every supported case at both layers; the broken
 runtime failing loudly at both layers; setup and suite-configuration
-errors (unreadable runtime, missing path, unreachable URL via an
-injected probe plus an end-to-end curl HEAD); the plan
+errors (unreadable runtime, missing path, unreachable URL via the
+injected curl-process boundary); the plan
 (byte-stability, URL target, checkout pinning, missing-path error,
 unreachable URL rejected); and the wrapper script end to end (local
 subset + skip note, plan written with `YUP_OIDF_SUITE` set, nonzero

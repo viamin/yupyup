@@ -280,16 +280,22 @@ defmodule Yup.Conformance.OAuthTest do
       assert OAuth.report(results) =~ "external suite error"
     end
 
-    # The default probe is curl HEAD — exercised end to end so the test
-    # actually catches a regression where the harness stops probing (the
-    # reviewer's concern: an unreachable URL must not be reported as a
-    # successful run).
+    # The default probe is a curl HEAD request. Injecting its process
+    # boundary keeps this assertion hermetic while still verifying that
+    # a failed reachability command is never treated as a usable suite.
     # @spec OAUTH-CF-6
     @tag :tmp_dir
-    test "the default probe rejects a URL that curl cannot reach", %{tmp_dir: tmp_dir} do
+    test "the default probe rejects a URL when its curl HEAD request fails", %{tmp_dir: tmp_dir} do
       suite = %{kind: :url, target: "https://does-not-exist.example.invalid"}
 
-      results = OAuth.run(work_dir: tmp_dir, suite: suite)
+      command_runner = fn command, arguments, options ->
+        assert command == "curl"
+        assert arguments == ["--silent", "--fail", "--head", "--max-time", "5", suite.target]
+        assert options == [stderr_to_stdout: true]
+        {"", 6}
+      end
+
+      results = OAuth.run(work_dir: tmp_dir, suite: suite, command_runner: command_runner)
 
       assert {:error, detail} = results.suite
       assert detail =~ "not reachable"
