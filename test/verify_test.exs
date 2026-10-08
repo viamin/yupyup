@@ -98,12 +98,14 @@ defmodule Yup.VerifyTest do
     end
     """
 
-    path = write_model(tmp_dir, "counter.yup", counter)
+    counter_path = write_model(tmp_dir, "counter.yup", counter)
+    light_path = write_model(tmp_dir, "light.yup", @light)
 
     assert {:error, %Verify.Failure{kind: :incomplete}} =
-             Verify.verify_file(path, max_states: 5)
+             Verify.verify_file(counter_path, max_states: 5)
 
-    assert {:ok, result} = Verify.verify_file(path, max_states: 10_000)
+    # A bounded/cyclic model completes within the default cap.
+    assert {:ok, result} = Verify.verify_file(light_path)
     assert result.complete == true
   end
 

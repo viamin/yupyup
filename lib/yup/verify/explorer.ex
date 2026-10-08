@@ -67,17 +67,16 @@ defmodule Yup.Verify.Explorer do
     |> elem(0)
   end
 
+  # At the cap we still drain the queue: queued states may only transition
+  # back to states we've already visited, in which case the search is
+  # complete. Incompleteness is reported the moment an expansion would add
+  # a state we have no room for.
   defp run(queue, search) do
-    cond do
-      :queue.is_empty(queue) ->
-        {:ok, result(search, true)}
-
-      MapSet.size(search.visited) >= search.max_states ->
-        {:error, incomplete_failure(search)}
-
-      true ->
-        {{:value, current}, queue} = :queue.out(queue)
-        expand(queue, search, current)
+    if :queue.is_empty(queue) do
+      {:ok, result(search, true)}
+    else
+      {{:value, current}, queue} = :queue.out(queue)
+      expand(queue, search, current)
     end
   end
 
@@ -88,7 +87,10 @@ defmodule Yup.Verify.Explorer do
       Enum.reduce_while(search.transitions, initial, fn transition, {:ok, {queue, search}} ->
         case apply_transition(transition, Map.new(current), search.env) do
           {:ok, next} ->
-            {:cont, {:ok, add_successor(queue, search, current, transition.name, next)}}
+            case add_successor(queue, search, current, transition.name, next) do
+              {:ok, {queue, search}} -> {:cont, {:ok, {queue, search}}}
+              {:incomplete, search} -> {:halt, {:error, incomplete_failure(search)}}
+            end
 
           {:error, error} ->
             {:halt, {:error, evaluation_failure(search, current, transition.name, error)}}
@@ -105,18 +107,23 @@ defmodule Yup.Verify.Explorer do
     canonical = Result.canonical_form(next)
     search = %{search | edges: search.edges + 1}
 
-    if MapSet.member?(search.visited, canonical) do
-      {queue, search}
-    else
-      search = %{
-        search
-        | queue: :queue.in(canonical, queue),
-          visited: MapSet.put(search.visited, canonical),
-          parents: Map.put(search.parents, canonical, {current, name}),
-          order: [canonical | search.order]
-      }
+    cond do
+      MapSet.member?(search.visited, canonical) ->
+        {:ok, {queue, search}}
 
-      {search.queue, search}
+      MapSet.size(search.visited) >= search.max_states ->
+        {:incomplete, search}
+
+      true ->
+        search = %{
+          search
+          | queue: :queue.in(canonical, queue),
+            visited: MapSet.put(search.visited, canonical),
+            parents: Map.put(search.parents, canonical, {current, name}),
+            order: [canonical | search.order]
+        }
+
+        {:ok, {search.queue, search}}
     end
   end
 
