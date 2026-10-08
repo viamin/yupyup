@@ -22,8 +22,12 @@ defmodule Yup.Conformance.OAuth do
   `plan.json` into the work dir recording the suite target, the
   deployment shape a suite-compatible deployment would need, and every
   case with its support status and reason: the hand-off artifact for a
-  manual suite run. Without it, the external part is skipped with a
-  note while the local subset still runs.
+  manual suite run. The URL must be reachable for the plan to be
+  written — a HEAD request confirms the deployment is up, treating an
+  unreachable target as a configuration error rather than reporting a
+  nonexistent suite as a successful run. Without `YUP_OIDF_SUITE` the
+  external part is skipped with a note while the local subset still
+  runs.
   """
 
   alias Yup.Conformance.OAuth.Cases
@@ -97,7 +101,9 @@ defmodule Yup.Conformance.OAuth do
   Options: `:runtime_file` (default `examples/oauth_runtime.yup`),
   `:work_dir` (default a fresh directory under the system temp
   directory), `:suite` (default `:not_configured`; pass a map shaped
-  like `find_suite/1`'s `{:ok, _}` value).
+  like `find_suite/1`'s `{:ok, _}` value), `:probe` (a 1-arity
+  function used to verify that a `:url` suite is reachable — defaults
+  to a HEAD request; tests inject a probe to avoid real HTTP calls).
   """
   # @spec OAUTH-CF-2
   # @spec OAUTH-CF-5
@@ -105,6 +111,7 @@ defmodule Yup.Conformance.OAuth do
   def run(opts \\ []) do
     runtime_file = Keyword.get(opts, :runtime_file, @default_runtime)
     work_dir = Keyword.get_lazy(opts, :work_dir, &fresh_work_dir/0)
+    probe = Keyword.get(opts, :probe, &default_probe/1)
     File.mkdir_p!(work_dir)
 
     results = %{
@@ -119,10 +126,10 @@ defmodule Yup.Conformance.OAuth do
 
     case setup(runtime_file) do
       {:ok, mod, models} ->
-        attach_plan(%{results | supported: run_supported(mod, models)})
+        attach_plan(%{results | supported: run_supported(mod, models)}, probe)
 
       {:error, detail} ->
-        attach_plan(%{results | setup: {:error, detail}})
+        attach_plan(%{results | setup: {:error, detail}}, probe)
     end
   end
 
@@ -374,10 +381,10 @@ defmodule Yup.Conformance.OAuth do
 
   # ── the external-suite plan ─────────────────────────────────────────
 
-  defp attach_plan(%{suite: :not_configured} = results), do: results
+  defp attach_plan(%{suite: :not_configured} = results, _probe), do: results
 
-  defp attach_plan(results) do
-    case describe_suite(results.suite) do
+  defp attach_plan(results, probe) do
+    case describe_suite(results.suite, probe) do
       {:ok, suite} ->
         plan_path = Path.join(results.work_dir, "plan.json")
         File.write!(plan_path, json(plan(results, suite)) <> "\n")
@@ -388,13 +395,23 @@ defmodule Yup.Conformance.OAuth do
     end
   end
 
-  # A path target must be an existing directory: a typo in
-  # YUP_OIDF_SUITE is a configuration error, not a skip (OAUTH-CF-6).
-  defp describe_suite(%{kind: :url} = suite) do
-    {:ok, %{kind: :url, target: suite.target, label: suite.target, commit: nil}}
+  # A path target must be an existing directory and a URL target must
+  # be reachable: a typo in YUP_OIDF_SUITE is a configuration error,
+  # not a skip (OAUTH-CF-6). For URLs, the probe (defaulting to a HEAD
+  # request via curl) is the reachability check, so an unreachable
+  # target fails the run instead of producing a `plan.json` for a suite
+  # no one can ever talk to.
+  defp describe_suite(%{kind: :url} = suite, probe) do
+    case probe.(suite.target) do
+      :ok ->
+        {:ok, %{kind: :url, target: suite.target, label: suite.target, commit: nil}}
+
+      {:error, detail} ->
+        {:error, detail}
+    end
   end
 
-  defp describe_suite(%{kind: :path, target: target}) do
+  defp describe_suite(%{kind: :path, target: target}, _probe) do
     if File.dir?(target) do
       abs = Path.absname(target)
       commit = git_commit(target)
@@ -421,6 +438,25 @@ defmodule Yup.Conformance.OAuth do
     end
   rescue
     _error -> nil
+  end
+
+  # The default reachability probe: a HEAD request with a short timeout
+  # and `--fail`, so DNS failure, connection refused, timeout, TLS
+  # error, and any HTTP >= 400 are all treated as unreachable — the
+  # exact failure mode does not matter, only that the suite can be
+  # talked to and answers success. Missing curl is also unreachable,
+  # since the harness has no other way to verify the deployment.
+  defp default_probe(url) do
+    case System.cmd(
+           "curl",
+           ["--silent", "--fail", "--head", "--max-time", "5", url],
+           stderr_to_stdout: true
+         ) do
+      {_output, 0} -> :ok
+      {_output, _status} -> {:error, "YUP_OIDF_SUITE names #{url}, which is not reachable"}
+    end
+  rescue
+    _error -> {:error, "YUP_OIDF_SUITE names #{url}, which is not reachable"}
   end
 
   defp plan(results, suite) do

@@ -834,8 +834,11 @@ Without `YUP_OIDF_SUITE` the harness prints that the external suite is
 not configured, writes no plan, and still runs the local manifest; the
 `mix test` suite covers the same manifest through
 `test/conformance/oauth_test.exs`, so CI passes with or without an
-external install. A `YUP_OIDF_SUITE` path that does not exist is a
-configuration error, not a skip, and exits nonzero.
+external install. A `YUP_OIDF_SUITE` path that does not exist, or a
+URL that cannot be reached, is a configuration error, not a skip, and
+exits nonzero — the URL check is a HEAD request (curl) so an
+unreachable deployment is reported loudly instead of being treated as
+a successful run for a suite no one can ever talk to.
 
 ## Proposed And Unresolved
 

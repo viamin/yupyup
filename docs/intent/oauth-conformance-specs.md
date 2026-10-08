@@ -34,15 +34,18 @@ optional, skip-safe external tooling this follows. Depends on #23.
   documentation and the manifest drift apart.
 - [x] **OAUTH-CF-5**: When `YUP_OIDF_SUITE` names an `http(s)://`
   deployment URL or an existing conformance-suite checkout, the harness
-  shall write a byte-stable `plan.json` into the work directory
-  recording the suite target (a checkout pinned by absolute path and
-  git commit when available), the deployment shape a
-  suite-compatible deployment would need, and every case with its
-  support status and reason, and the report shall name the plan path.
+  shall verify the target — a HEAD request that confirms a URL is
+  reachable, an existing directory for a checkout — and write a
+  byte-stable `plan.json` into the work directory recording the suite
+  target (a checkout pinned by absolute path and git commit when
+  available), the deployment shape a suite-compatible deployment would
+  need, and every case with its support status and reason, and the
+  report shall name the plan path.
 - [x] **OAUTH-CF-6**: When `YUP_OIDF_SUITE` names a path that does not
-  exist, or the runtime file or a model cannot be loaded or verified,
-  the harness shall report the configuration/setup error and exit
-  nonzero rather than skipping silently or reporting case results.
+  exist or a URL that cannot be reached, or the runtime file or a
+  model cannot be loaded or verified, the harness shall report the
+  configuration/setup error and exit nonzero rather than skipping
+  silently or reporting case results.
 - [x] **OAUTH-CF-7**: The documentation shall present the harness as an
   interoperability harness, not certification, shall give the exact
   commands for the local run and the manual external-suite path

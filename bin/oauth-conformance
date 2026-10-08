@@ -13,7 +13,8 @@
 # checkout, a deterministic plan.json hand-off is written for a manual
 # suite run. Without it the external part is skipped with a note and
 # the local subset still runs (exit 0 on pass). A set-but-missing
-# checkout path is a configuration error and exits 1.
+# checkout path or an unreachable URL is a configuration error and
+# exits 1: a typo or a suite that cannot be talked to is not a skip.
 #
 # Usage:
 #   bin/oauth-conformance [RUNTIME.yup]   # defaults to examples/oauth_runtime.yup

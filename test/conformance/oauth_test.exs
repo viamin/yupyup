@@ -211,7 +211,8 @@ defmodule Yup.Conformance.OAuthTest do
     test "writes a byte-stable plan.json for a deployment url", %{tmp_dir: tmp_dir} do
       suite = %{kind: :url, target: "https://www.certification.openid.net"}
 
-      results = OAuth.run(work_dir: tmp_dir, suite: suite)
+      results =
+        OAuth.run(work_dir: tmp_dir, suite: suite, probe: fn _url -> :ok end)
 
       assert results.plan_path == Path.join(tmp_dir, "plan.json")
 
@@ -225,7 +226,9 @@ defmodule Yup.Conformance.OAuthTest do
       assert OAuth.exit_code(results) == 0
       assert OAuth.report(results) =~ "plan written to"
 
-      again = OAuth.run(work_dir: Path.join(tmp_dir, "again"), suite: suite)
+      again =
+        OAuth.run(work_dir: Path.join(tmp_dir, "again"), suite: suite, probe: fn _url -> :ok end)
+
       assert File.read!(again.plan_path) == plan
     end
 
@@ -235,7 +238,13 @@ defmodule Yup.Conformance.OAuthTest do
     test "the plan still lists every case when setup fails", %{tmp_dir: tmp_dir} do
       suite = %{kind: :url, target: "https://www.certification.openid.net"}
 
-      results = OAuth.run(runtime_file: "nope.yup", work_dir: tmp_dir, suite: suite)
+      results =
+        OAuth.run(
+          runtime_file: "nope.yup",
+          work_dir: tmp_dir,
+          suite: suite,
+          probe: fn _url -> :ok end
+        )
 
       assert {:error, _detail} = results.setup
       assert results.supported == []
@@ -248,6 +257,44 @@ defmodule Yup.Conformance.OAuthTest do
 
       assert OAuth.exit_code(results) == 1
       assert OAuth.report(results) =~ "setup error"
+    end
+
+    # @spec OAUTH-CF-6
+    @tag :tmp_dir
+    test "an unreachable deployment url is a configuration error, not a pass", %{
+      tmp_dir: tmp_dir
+    } do
+      suite = %{kind: :url, target: "https://does-not-exist.example.invalid"}
+
+      results =
+        OAuth.run(
+          work_dir: tmp_dir,
+          suite: suite,
+          probe: fn url -> {:error, "YUP_OIDF_SUITE names #{url}, which is not reachable"} end
+        )
+
+      assert {:error, detail} = results.suite
+      assert detail =~ "not reachable"
+      assert results.plan_path == nil
+      assert OAuth.exit_code(results) == 1
+      assert OAuth.report(results) =~ "external suite error"
+    end
+
+    # The default probe is curl HEAD — exercised end to end so the test
+    # actually catches a regression where the harness stops probing (the
+    # reviewer's concern: an unreachable URL must not be reported as a
+    # successful run).
+    # @spec OAUTH-CF-6
+    @tag :tmp_dir
+    test "the default probe rejects a URL that curl cannot reach", %{tmp_dir: tmp_dir} do
+      suite = %{kind: :url, target: "https://does-not-exist.example.invalid"}
+
+      results = OAuth.run(work_dir: tmp_dir, suite: suite)
+
+      assert {:error, detail} = results.suite
+      assert detail =~ "not reachable"
+      assert results.plan_path == nil
+      assert OAuth.exit_code(results) == 1
     end
 
     # @spec OAUTH-CF-5

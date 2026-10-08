@@ -60,10 +60,15 @@ the external part is skipped with a note and a passing local run exits
   anything else is a checkout path. Unset means skip (exit 0 on a
   passing local run, note printed) — the same skip-not-fail discipline
   as #21. A path that is set but missing is a configuration error that
-  exits nonzero: a typo is not a skip. A checkout is pinned by absolute
-  path plus git commit when available, and `plan.json` is byte-stable
-  (sorted keys, no timestamps), so a suite commit plus plan bytes are
-  reproducible evidence of a manual run.
+  exits nonzero: a typo is not a skip. A URL target is verified by a
+  HEAD request (curl), so an unreachable deployment is the same kind
+  of configuration error rather than reporting a nonexistent suite as
+  a successful run; the probe is injected via a `:probe` opt in tests
+  so the harness does not depend on network access in `mix test`. A
+  checkout is pinned by absolute path plus git commit when available,
+  and `plan.json` is byte-stable (sorted keys, no timestamps), so a
+  suite commit plus plan bytes are reproducible evidence of a manual
+  run.
 - **Reuse, don't duplicate, the #23 mapping.** `Yup.OAuthTrace` moved
   from `test/support` to `lib/yup/oauth_trace.ex` so the harness and
   the trace tests share one abstraction relation; it remains tooling
@@ -95,11 +100,14 @@ entries carry non-empty reasons, and every id and title appears in the
 `find_suite/1` classification and the unset/blank skip; the good
 runtime passing every supported case at both layers; the broken
 runtime failing loudly at both layers; setup and suite-configuration
-errors; the plan (byte-stability, URL target, checkout pinning,
-missing-path error); and the wrapper script end to end (local subset +
-skip note, plan written with `YUP_OIDF_SUITE` set, nonzero exit against
-the broken runtime). CI additionally runs `bin/oauth-conformance` as
-the harness smoke check, mirroring the #21 script.
+errors (unreadable runtime, missing path, unreachable URL via an
+injected probe plus an end-to-end curl HEAD); the plan
+(byte-stability, URL target, checkout pinning, missing-path error,
+unreachable URL rejected); and the wrapper script end to end (local
+subset + skip note, plan written with `YUP_OIDF_SUITE` set, nonzero
+exit against the broken runtime). CI additionally runs
+`bin/oauth-conformance` as the harness smoke check, mirroring the
+#21 script.
 
 ## Module map
 
