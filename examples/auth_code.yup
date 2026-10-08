@@ -1,0 +1,16 @@
+model AuthCode
+  state issued = false
+  state redemptions = 0
+
+  invariant "authorization code is single-use" do
+    redemptions <= 1
+  end
+
+  transition issue do
+    state.issued = true
+  end
+
+  transition redeem do
+    state.redemptions = issued and redemptions == 0 ? redemptions + 1 : redemptions
+  end
+end
