@@ -61,6 +61,13 @@ defmodule Yup.Verify.Evaluator do
   defp eval_binary(%BinaryOp{op: op, left: left, right: right} = node, env) do
     left_value = eval(left, env)
     right_value = eval(right, env)
+    apply_binary(node, env, {left_value, right_value})
+  end
+
+  # Exception handlers cannot access bindings created in their protected
+  # expression. Keep the operands in a function argument so diagnostics can
+  # distinguish division by zero from other arithmetic errors.
+  defp apply_binary(%BinaryOp{op: op} = node, env, {left_value, right_value}) do
     apply_op(op, left_value, right_value)
   rescue
     ArithmeticError -> raise source_error(env.path, node.loc, arithmetic_message(op, right_value))
