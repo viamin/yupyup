@@ -1,0 +1,141 @@
+defmodule Yup.VerifyTest do
+  @moduledoc false
+
+  use ExUnit.Case, async: true
+
+  import ExUnit.CaptureIO
+
+  alias Yup.SourceError
+  alias Yup.Verify
+
+  @light """
+  model Light
+    state value = :off
+
+    transition toggle do
+      state.value = value == :off ? :on : :off
+    end
+  end
+  """
+
+  defp write_model(tmp_dir, name, source) do
+    path = Path.join(tmp_dir, name)
+    File.write!(path, source)
+    path
+  end
+
+  # ── entry point ─────────────────────────────────────────────────────
+
+  # @spec VERIFY-4
+  test "verify_file explores the shipped light example" do
+    assert {:ok, result} = Verify.verify_file("examples/light.yup")
+
+    assert result.model_name == "Light"
+    assert result.states == 2
+    assert result.transitions == 2
+    assert result.complete == true
+  end
+
+  # @spec VERIFY-5
+  test "format_result reports counts without claiming property verification" do
+    {:ok, result} = Verify.verify_file("examples/light.yup")
+
+    assert Verify.format_result(result) ==
+             "model Light: exploration complete: 2 states, 2 transitions explored"
+
+    refute Verify.format_result(result) =~ ~r/verif/i
+  end
+
+  # ── exactly one model ───────────────────────────────────────────────
+
+  # @spec VERIFY-1
+  test "rejects a file with no model", %{tmp_dir: tmp_dir} do
+    path = write_model(tmp_dir, "no_model.yup", "puts 1\n")
+
+    assert {:error, %SourceError{} = error} = Verify.verify_file(path)
+    assert error.message == "expected exactly one model to verify, found 0"
+  end
+
+  # @spec VERIFY-1
+  test "rejects a file with multiple models", %{tmp_dir: tmp_dir} do
+    path = write_model(tmp_dir, "two_models.yup", @light <> "\n" <> @light)
+
+    assert {:error, %SourceError{} = error} = Verify.verify_file(path)
+    assert error.message == "expected exactly one model to verify, found 2"
+  end
+
+  # @spec VERIFY-1
+  test "does not execute coexisting executable code", %{tmp_dir: tmp_dir} do
+    path = write_model(tmp_dir, "mixed.yup", @light <> ~s(\nputs "must not run"\n))
+
+    output = capture_io(fn -> assert {:ok, _result} = Verify.verify_file(path) end)
+    assert output == ""
+  end
+
+  # @spec VERIFY-1
+  test "propagates parse errors as source errors", %{tmp_dir: tmp_dir} do
+    path = write_model(tmp_dir, "bad.yup", "model Light\n  state value = \nend\n")
+
+    assert {:error, %SourceError{} = error} = Verify.verify_file(path)
+    assert error.message =~ "unexpected end of expression"
+  end
+
+  test "reports a missing file" do
+    assert {:error, %File.Error{}} = Verify.verify_file("examples/does_not_exist.yup")
+  end
+
+  # ── bounded exploration and failures through the entry point ────────
+
+  # @spec VERIFY-6
+  test "honors the max-states option", %{tmp_dir: tmp_dir} do
+    counter = """
+    model Counter
+      state count = 0
+
+      transition increment do
+        state.count = count + 1
+      end
+    end
+    """
+
+    path = write_model(tmp_dir, "counter.yup", counter)
+
+    assert {:error, %Verify.Failure{kind: :incomplete}} =
+             Verify.verify_file(path, max_states: 5)
+
+    assert {:ok, result} = Verify.verify_file(path, max_states: 10_000)
+    assert result.complete == true
+  end
+
+  # @spec VERIFY-6
+  test "rejects a non-positive max-states option", %{tmp_dir: tmp_dir} do
+    path = write_model(tmp_dir, "light.yup", @light)
+
+    assert {:error, %Verify.Failure{} = failure} = Verify.verify_file(path, max_states: 0)
+    assert failure.diagnostic.message =~ "--max-states must be a positive integer"
+  end
+
+  # @spec VERIFY-3
+  test "rejects self-referential state initializers end to end", %{tmp_dir: tmp_dir} do
+    chained = """
+    model Chain
+      state a = 1
+      state b = a + 1
+    end
+    """
+
+    path = write_model(tmp_dir, "chain.yup", chained)
+
+    assert {:error, %Verify.Failure{} = failure} = Verify.verify_file(path)
+    assert failure.diagnostic.message =~ "state initializers cannot read state fields (a)"
+  end
+
+  # ── program-level API ───────────────────────────────────────────────
+
+  # @spec VERIFY-1
+  test "verify_program explores an in-memory parsed program" do
+    {:ok, program} = Yup.Parser.parse(@light, path: "light.yup")
+    assert {:ok, result} = Verify.verify_program(program, path: "light.yup")
+    assert result.model_name == "Light"
+  end
+end
