@@ -19,6 +19,9 @@ defmodule Yup.CLI do
       ["verify" | rest] ->
         verify(rest)
 
+      ["export" | rest] ->
+        export(rest)
+
       [] ->
         IO.puts(:stderr, usage())
         exit({:shutdown, 1})
@@ -56,6 +59,33 @@ defmodule Yup.CLI do
     end
   end
 
+  defp export(["tla" | rest]) do
+    case rest do
+      [path] ->
+        case Yup.Export.Tla.export_file(path) do
+          {:ok, module} ->
+            IO.write(module)
+
+          {:error, error} ->
+            IO.puts(:stderr, format_error(error))
+            exit({:shutdown, 1})
+        end
+
+      files ->
+        IO.puts(
+          :stderr,
+          "yup export tla takes exactly one FILE, got: #{Enum.join(files, " ")}\n\n" <> usage()
+        )
+
+        exit({:shutdown, 1})
+    end
+  end
+
+  defp export(_args) do
+    IO.puts(:stderr, "unknown export command\n\n" <> usage())
+    exit({:shutdown, 1})
+  end
+
   defp option_errors(invalid) do
     invalid
     |> Enum.map(fn
@@ -71,6 +101,7 @@ defmodule Yup.CLI do
       yup --version
       yup run FILE
       yup verify [--max-states N] FILE
+      yup export tla FILE
     """
     |> String.trim_trailing()
   end

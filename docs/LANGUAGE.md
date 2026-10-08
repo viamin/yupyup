@@ -496,6 +496,78 @@ Passing and failing examples ship in `examples/invariants.yup` and
 `examples/broken_invariant.yup`. Temporal properties, fairness, refinement,
 and SMT-backed proof are out of scope.
 
+## External Cross-Checking With TLA+
+
+Finite models can be exported to a TLA+ module and checked with an external
+TLA+/TLC installation, so verification results do not depend solely on
+YupYup's own verifier:
+
+```sh
+./yup export tla examples/auth_code.yup > AuthCode.tla
+```
+
+`yup export tla FILE` writes the module to stdout, so save it under the
+model's name with a `.tla` extension (TLC requires the module name and the
+file name to match). The generated module declares:
+
+- every state field as a TLA+ `VARIABLES` entry, in declaration order, with
+  the initializer values as `Init`;
+- one next-state action per transition, disjoined into `Next`, where fields
+  the body does not assign stay `UNCHANGED` and a field assigned earlier in
+  the same body is read at its next-state (primed) value, matching YupYup's
+  sequential update semantics;
+- one numbered `Invariant` definition per declared invariant, plus
+  `Spec == Init /\ [][Next]_vars`, which allows stuttering so TLC explores
+  the same finite state graph as `yup verify` without spurious deadlock
+  reports.
+
+The export supports the `yup verify` expression subset minus strings and
+`nil`: integer, boolean, and atom literals, state field reads, `+ - * /`,
+`== != < <= > >=`, `and`/`or`/`not`, and ternaries. The translation
+preserves YupYup semantics:
+
+- atoms become distinct TLA+ strings (`:known` becomes `"known"`);
+- `/` truncates toward zero like `Yup.Runtime.divide/2` (Elixir `div/2`), but
+  TLA+ `div` floors, so `/` becomes an `IF` expression over `div` and `%`
+  that adds one back to the floored quotient whenever the operands' signs
+  differ and the division isn't exact — the only case where flooring and
+  truncating disagree; `<=` becomes `=<`; `!=` becomes `#`;
+- `and`, `or`, `not`, and ternary conditions test YupYup truthiness, so
+  operands that are not statically boolean (everything except comparisons,
+  boolean operators, and boolean literals) are compared against `FALSE`.
+
+Ordering comparisons (`< <= > >=`) require both operands to be statically
+non-atom and non-boolean, since TLC's ordering operators only accept
+integers, unlike `yup verify`'s Elixir term ordering; `==`/`!=` have no such
+restriction.
+
+Anything else fails with a source-located diagnostic and a nonzero exit:
+string and `nil` literals, calls and list/map/record expressions, bare
+expression statements (no assignment) in transition bodies, ordering
+comparisons over operands that are statically atoms or booleans, assigning
+the same field twice in one transition, and names that cannot become TLA+
+identifiers (such as `ok?`) or that collide with generated definitions
+(`vars`, `Init`, `Next`, `Spec`, and the numbered invariants). The file must
+contain exactly one model block, as with `yup verify`.
+
+To check an exported model with TLC, save the module and the companion
+configuration the module's trailing comment documents, then run TLC from an
+existing TLA+ installation:
+
+```sh
+./yup export tla examples/auth_code.yup > AuthCode.tla
+cat > AuthCode.cfg <<'EOF'
+SPECIFICATION Spec
+INVARIANT Invariant1
+EOF
+java tlc2.TLC AuthCode
+```
+
+`examples/auth_code.yup` and `examples/pkce_exchange.yup` both export
+cleanly. Temporal properties, refinement checking, and automating or
+vendoring TLC are out of scope: the export is a text artifact, and running
+the external checker is up to your TLC installation.
+
 ## Proposed And Unresolved
 
 Dot calls on actor references may represent message operations rather than

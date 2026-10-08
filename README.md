@@ -42,6 +42,8 @@ This creates an executable named `yup` in the project root.
 ./yup verify examples/broken_auth_code.yup
 ./yup verify examples/pkce_exchange.yup
 ./yup verify examples/broken_pkce_exchange.yup
+./yup export tla examples/auth_code.yup > AuthCode.tla
+./yup export tla examples/pkce_exchange.yup > PkceExchange.tla
 ```
 
 `yup verify` explores the reachable states of the file's single `model` block
@@ -70,6 +72,12 @@ rule, not the hash. `examples/broken_pkce_exchange.yup` is the same exchange
 with a server that issues the token on an invalid verifier, so verification
 exits nonzero with the counterexample trace `submit_invalid_verifier`
 reaching the state `{challenge: :known, token_issued: true, verifier: :wrong}`.
+
+`yup export tla FILE` writes the file's single model as a TLA+ module on
+stdout for cross-checking with an external TLA+/TLC installation; save it as
+`<Model>.tla` next to the companion `.cfg` the module documents. See
+[External Cross-Checking With TLA+](docs/LANGUAGE.md#external-cross-checking-with-tla)
+in the language docs for the supported subset and how to run TLC.
 
 Expected output:
 

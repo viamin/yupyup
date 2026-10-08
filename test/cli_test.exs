@@ -308,6 +308,71 @@ defmodule Yup.CLITest do
     end
   end
 
+  describe "export tla" do
+    # @spec TLA-1
+    test "exports the auth-code example as a TLA+ module", %{yup: yup} do
+      assert {output, 0} =
+               System.cmd(yup, ["export", "tla", "examples/auth_code.yup"],
+                 stderr_to_stdout: true
+               )
+
+      assert output =~ "MODULE AuthCode"
+      assert output =~ "EXTENDS Integers"
+      assert output =~ "VARIABLES issued, redemptions"
+      assert output =~ "Init =="
+      assert output =~ "Issue =="
+      assert output =~ "Redeem =="
+      assert output =~ "Next == Issue \\/ Redeem"
+      assert output =~ "Invariant1 == (redemptions =< 1)"
+    end
+
+    # @spec TLA-1
+    test "exports the pkce example as a TLA+ module", %{yup: yup} do
+      assert {output, 0} =
+               System.cmd(yup, ["export", "tla", "examples/pkce_exchange.yup"],
+                 stderr_to_stdout: true
+               )
+
+      assert output =~ "MODULE PkceExchange"
+      assert output =~ "VARIABLES challenge, verifier, token_issued"
+      assert output =~ "Next == SubmitValidVerifier \\/ SubmitInvalidVerifier"
+      assert output =~ ~S{Invariant1 == ((~ (token_issued # FALSE)) \/ (verifier = "matching"))}
+    end
+
+    # @spec TLA-4
+    @tag :tmp_dir
+    test "reports unsupported export syntax with nonzero exit", %{tmp_dir: tmp_dir, yup: yup} do
+      path = Path.join(tmp_dir, "string_model.yup")
+
+      File.write!(path, """
+      model Named
+        state name = "ada"
+      end
+      """)
+
+      assert {output, 1} = System.cmd(yup, ["export", "tla", path], stderr_to_stdout: true)
+      assert output =~ "string literals are not supported in TLA+ export"
+    end
+
+    # @spec TLA-6
+    @tag :tmp_dir
+    test "reports a file with no model with nonzero exit", %{tmp_dir: tmp_dir, yup: yup} do
+      path = Path.join(tmp_dir, "no_model.yup")
+      File.write!(path, "puts 1\n")
+
+      assert {output, 1} = System.cmd(yup, ["export", "tla", path], stderr_to_stdout: true)
+      assert output =~ "expected exactly one model to export, found 0"
+    end
+
+    test "rejects a missing file argument" do
+      assert catch_exit(Yup.CLI.main(["export", "tla"])) == {:shutdown, 1}
+    end
+
+    test "rejects unknown export backends" do
+      assert catch_exit(Yup.CLI.main(["export", "smt", "examples/light.yup"])) == {:shutdown, 1}
+    end
+  end
+
   test "unknown command exits non-zero" do
     assert catch_exit(Yup.CLI.main(["wat"])) == {:shutdown, 1}
   end
