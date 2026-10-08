@@ -61,7 +61,7 @@ defmodule Yup.OAuthRuntimeTest do
       assert reason =~ "unregistered"
     end
 
-    # @spec OAUTH-RT-4
+    # @spec OAUTH-RT-1
     test "stores the challenge derived from the verifier, never the raw verifier", %{
       mod: mod,
       server: server
