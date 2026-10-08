@@ -156,7 +156,7 @@ defmodule Yup.Crosscheck.Tlc do
          {:ok, model} <- module_name(module_text) do
       run_and_compare(file, tlc, model, module_text, verdict, run_dir)
     else
-      {:error, message} -> error_result(file, message, run_dir)
+      {:error, message} -> error_result(file, format_error(message), run_dir)
     end
   end
 

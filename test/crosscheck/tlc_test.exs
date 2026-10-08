@@ -105,6 +105,39 @@ defmodule Yup.Crosscheck.TlcTest do
       assert Yup.Crosscheck.Tlc.exit_code([result]) == 1
     end
 
+    # @spec TLA-XC-6
+    @tag :tmp_dir
+    test "reports unexportable models as errors with a printable diagnostic", %{tmp_dir: tmp_dir} do
+      source = Path.join(tmp_dir, "strings.yup")
+
+      File.write!(source, """
+      model Strings
+        state label = "none"
+
+        invariant "label stays none" do
+          label == "none"
+        end
+
+        transition relabel do
+          state.label = "none"
+        end
+      end
+      """)
+
+      [result] = Yup.Crosscheck.Tlc.crosscheck([source], ["echo"], work_dir: tmp_dir)
+
+      assert result.status == :error
+      assert result.yup == :none
+      assert result.tlc == nil
+      assert is_binary(result.detail)
+      assert result.detail =~ "string literals are not supported in TLA+ export"
+      assert Yup.Crosscheck.Tlc.exit_code([result]) == 1
+
+      report = Yup.Crosscheck.Tlc.report([result])
+      assert report =~ "error     #{source}:"
+      assert report =~ "0/1 models agree"
+    end
+
     # @spec TLA-XC-3
     test "report makes a disagreement obvious with a TLC excerpt" do
       result = %{
