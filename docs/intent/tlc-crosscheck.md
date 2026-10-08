@@ -47,13 +47,17 @@ without a TLA+ install.
   fixtures.
 - **Export before TLC.** For each file the runner exports the module
   with `Yup.Export.Tla.export_file/1`, writes it as `<Model>.tla` plus a
-  generated `<Model>.cfg` (`SPECIFICATION Spec` and one `INVARIANT
-  InvariantN` line per numbered definition in the module text) into a
-  per-file run directory — named after the source basename, because the
-  broken fixtures reuse the `AuthCode`/`PkceExchange` model names — and
-  only then spawns TLC with that directory as its cwd (TLA-XC-4). The
-  run directories live under a per-run work directory that survives the
-  run for inspection and is named in the report.
+  generated `<Model>.cfg` (`SPECIFICATION Spec`, `CHECK_DEADLOCK FALSE`,
+  and one `INVARIANT InvariantN` line per numbered definition in the
+  module text) into a per-file run directory — named after the source
+  basename, because the broken fixtures reuse the
+  `AuthCode`/`PkceExchange` model names — and only then spawns TLC with
+  that directory as its cwd (TLA-XC-4). `CHECK_DEADLOCK FALSE` matters
+  because the verifier only classifies invariant violations as
+  failures, so without it TLC's default deadlock check would fail
+  otherwise-agreeing models that simply reach a reachable terminal
+  state. The run directories live under a per-run work directory that
+  survives the run for inspection and is named in the report.
 - **Reuse in-process, spawn only TLC.** The YupYup side runs
   `Yup.Verify.verify_file/2` and the exporter inside the cross-check
   process — the same boundaries the CLI uses — so the only external

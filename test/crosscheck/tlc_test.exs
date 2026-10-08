@@ -311,7 +311,36 @@ defmodule Yup.Crosscheck.TlcTest do
       assert recorded =~ "---- MODULE AuthCode ----"
       assert recorded =~ "---- MODULE PkceExchange ----"
       assert recorded =~ "SPECIFICATION Spec"
+      assert recorded =~ "CHECK_DEADLOCK FALSE"
       assert recorded =~ "INVARIANT Invariant1"
+    end
+
+    # @spec TLA-XC-7
+    @tag :tmp_dir
+    test "disables TLC's deadlock check so a reachable terminal state cannot disagree", %{
+      tmp_dir: tmp_dir
+    } do
+      shim =
+        write_shim(
+          tmp_dir,
+          ~S"""
+          #!/bin/sh
+          grep -q '^CHECK_DEADLOCK FALSE$' "$1.cfg" || {
+            echo "CHECK_DEADLOCK FALSE missing from cfg" >&2
+            exit 1
+          }
+          case "$(basename "$(pwd)")" in
+            broken_*)
+              printf 'Error: Invariant Invariant1 is violated by the initial state:\n'
+              exit 1
+              ;;
+            *) exit 0 ;;
+          esac
+          """
+        )
+
+      assert {output, 0} = run_script(%{"YUP_TLC" => shim})
+      assert output =~ "4/4 models agree"
     end
 
     # @spec TLA-XC-3

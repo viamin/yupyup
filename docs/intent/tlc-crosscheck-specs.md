@@ -36,3 +36,8 @@ modules this cross-check replays in TLC. Depends on #20.
   cross-check shall report that file as an error, including TLC's output
   in the diagnostic when TLC ran, rather than as agreement or
   disagreement, and shall exit nonzero.
+- [x] **TLA-XC-7**: When the cross-check generates a model's `.cfg`, it
+  shall set `CHECK_DEADLOCK FALSE` so that TLC's default deadlock check
+  does not turn a reachable terminal state into a disagreement with the
+  YupYup verifier, which classifies only invariant violations as
+  failures.

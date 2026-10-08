@@ -188,14 +188,19 @@ defmodule Yup.Crosscheck.Tlc do
   # The exported module and its companion .cfg must exist in TLC's run
   # directory before TLC is invoked (TLA-XC-4). The .cfg mirrors the
   # trailing comment the exporter documents: SPECIFICATION Spec plus one
-  # INVARIANT line per numbered invariant definition.
+  # INVARIANT line per numbered invariant definition. CHECK_DEADLOCK FALSE
+  # is added because the verifier only classifies invariant violations as
+  # failures, not terminal states with no enabled transition; without it,
+  # TLC's default deadlock check would fail otherwise-agreeing models that
+  # simply reach a reachable terminal state.
   # @spec TLA-XC-4
+  # @spec TLA-XC-7
   defp run_and_compare(file, tlc, model, module_text, verdict, run_dir) do
     File.write!(Path.join(run_dir, model <> ".tla"), module_text)
 
     File.write!(
       Path.join(run_dir, model <> ".cfg"),
-      ["SPECIFICATION Spec\n" | config_invariants(module_text)]
+      ["SPECIFICATION Spec\n", "CHECK_DEADLOCK FALSE\n" | config_invariants(module_text)]
     )
 
     {tlc_output, tlc_status} = run_tlc(tlc, model, run_dir)
