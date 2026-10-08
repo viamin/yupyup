@@ -68,6 +68,8 @@ defmodule Yup.Runtime do
   defp nested_display(value) when is_binary(value), do: inspect(value)
   defp nested_display(value), do: display(value)
 
-  defp truthy?(value) when value in [nil, false], do: false
-  defp truthy?(_value), do: true
+  # Shared with Yup.Verify.Evaluator so model-expression ternaries use the
+  # same documented truthiness as the executable language.
+  def truthy?(value) when value in [nil, false], do: false
+  def truthy?(_value), do: true
 end

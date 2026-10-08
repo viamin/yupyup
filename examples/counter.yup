@@ -1,0 +1,7 @@
+model Counter
+  state count = 0
+
+  transition increment do
+    state.count = count + 1
+  end
+end

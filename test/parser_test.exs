@@ -803,6 +803,29 @@ defmodule Yup.ParserTest do
              transition.body
   end
 
+  test "parses bare field name reads in transition update expressions" do
+    source = """
+    model Swap
+      state a = 1
+      state b = 2
+
+      transition swap do
+        state.a = b
+        state.b = state.a
+      end
+    end
+    """
+
+    assert {:ok, %Program{models: [%Model{transitions: [transition]}]}} =
+             Yup.Parser.parse(source, path: "model.yup")
+
+    assert [
+             %StateUpdate{value: %Identifier{name: "b"}},
+             %StateUpdate{value: %StateAccess{name: "a"}}
+           ] =
+             transition.body
+  end
+
   test "model and executable code coexist in one source file" do
     source = """
     model Light

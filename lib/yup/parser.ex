@@ -447,7 +447,7 @@ defmodule Yup.Parser do
   defp parse_model_state(line, text, rest, path) do
     trimmed = String.trim(text)
 
-    case Regex.run(~r/^state\s+([a-z_][a-zA-Z0-9_?!]*)\s*=\s*(.+)$/, trimmed) do
+    case Regex.run(~r/^state\s+([a-z_][a-zA-Z0-9_?!]*)\s*=\s*(.*)$/, trimmed) do
       [_, name, expr_text] ->
         value = parse_model_expression(expr_text, line, path)
         {%ModelState{name: name, value: value, loc: loc(line, 1)}, rest}
