@@ -90,12 +90,6 @@ cleanly:
 YUP_TLC='java -cp /opt/tla2tools.jar tlc2.TLC' bin/tlc-crosscheck
 ```
 
-Expected output:
-
-```text
-Hello, world
-```
-
 ## Test
 
 ```sh
