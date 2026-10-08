@@ -38,6 +38,8 @@ This creates an executable named `yup` in the project root.
 ./yup verify --max-states 100 examples/counter.yup
 ./yup verify examples/invariants.yup
 ./yup verify examples/broken_invariant.yup
+./yup verify examples/auth_code.yup
+./yup verify examples/broken_auth_code.yup
 ```
 
 `yup verify` explores the reachable states of the file's single `model` block
@@ -47,6 +49,13 @@ nonzero and reports the counts reached. A failing invariant exits nonzero and
 prints its name, source location, the violating state, and a counterexample
 trace from the initial state; results only ever speak about explored states,
 never unbounded proof.
+
+`examples/auth_code.yup` is the security-protocol verification example: it
+models an authorization code that may be redeemed at most once, guarded by the
+invariant `redemptions <= 1`. `examples/broken_auth_code.yup` is the same
+protocol without the single-use guard, so verification exits nonzero with the
+counterexample trace `issue, redeem, redeem` reaching the doubly-redeemed
+state `{issued: true, redemptions: 2}`.
 
 Expected output:
 
