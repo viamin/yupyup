@@ -230,6 +230,27 @@ defmodule Yup.Conformance.OAuthTest do
     end
 
     # @spec OAUTH-CF-5
+    # @spec OAUTH-CF-6
+    @tag :tmp_dir
+    test "the plan still lists every case when setup fails", %{tmp_dir: tmp_dir} do
+      suite = %{kind: :url, target: "https://www.certification.openid.net"}
+
+      results = OAuth.run(runtime_file: "nope.yup", work_dir: tmp_dir, suite: suite)
+
+      assert {:error, _detail} = results.setup
+      assert results.supported == []
+
+      plan = File.read!(results.plan_path)
+      assert plan =~ "authorization-code-issued"
+      assert plan =~ "token-unknown-code-refused"
+      assert plan =~ "pkce-s256-test-vectors"
+      assert plan =~ "\"reason\""
+
+      assert OAuth.exit_code(results) == 1
+      assert OAuth.report(results) =~ "setup error"
+    end
+
+    # @spec OAUTH-CF-5
     @tag :tmp_dir
     test "pins a checkout path in the plan", %{tmp_dir: tmp_dir} do
       checkout = Path.join(tmp_dir, "conformance-suite")

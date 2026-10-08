@@ -202,7 +202,7 @@ defmodule Yup.Conformance.OAuth do
   defp parse_models([], models), do: {:ok, Enum.reverse(models)}
 
   defp parse_models([path | rest], models) do
-    with {:ok, source} <- File.read(path),
+    with {:ok, source} <- read_source(path),
          {:ok, program} <- Yup.Parser.parse(source, path: path) do
       parse_models(rest, [hd(program.models) | models])
     else
@@ -211,12 +211,21 @@ defmodule Yup.Conformance.OAuth do
   end
 
   defp compile_runtime(path) do
-    with {:ok, source} <- File.read(path),
+    with {:ok, source} <- read_source(path),
          {:ok, program} <- Yup.Parser.parse(source, path: path),
          {:ok, module} <- Yup.Compiler.compile(program) do
       {:ok, module}
     else
       {:error, error} -> {:error, format_error(error)}
+    end
+  end
+
+  # File.read/1 fails with a bare posix atom (:enoent); wrapping it in
+  # File.Error lets format_error/1 report the path, not just the atom.
+  defp read_source(path) do
+    case File.read(path) do
+      {:ok, source} -> {:ok, source}
+      {:error, reason} -> {:error, %File.Error{action: "read", path: path, reason: reason}}
     end
   end
 
@@ -430,7 +439,15 @@ defmodule Yup.Conformance.OAuth do
           "redirect_uri" => Cases.redirect_uri()
         }
       },
-      "supported" => Enum.map(results.supported, &plan_entry/1),
+      # Manifest-derived, not run-derived: on a setup error no case ran,
+      # but the plan must still record every case's support status
+      # (OAUTH-CF-5). Map.take drops the struct's nil :reason so
+      # plan_entry/1 does not emit "reason": null for supported cases.
+      "supported" =>
+        Cases.all()
+        |> Enum.filter(&Cases.supported?/1)
+        |> Enum.map(&Map.take(&1, [:id, :title, :source]))
+        |> Enum.map(&plan_entry/1),
       "unsupported" => Enum.map(results.unsupported, &plan_entry/1)
     }
   end
