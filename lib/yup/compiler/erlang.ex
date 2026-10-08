@@ -114,17 +114,26 @@ defmodule Yup.Compiler.Erlang do
     call_args = call_args(receiver, args, function_names)
 
     case {name, call_args} do
-      {"puts", [arg]} -> remote_call(line, :"Elixir.Yup.Runtime", :puts, [arg])
-      {"map", [_, _]} -> remote_call(line, :"Elixir.Yup.Runtime", :map, call_args)
-      {"select", [_, _]} -> remote_call(line, :"Elixir.Yup.Runtime", :select, call_args)
-      {"new_endpoint", []} -> remote_call(line, :"Elixir.Yup.Runtime", :new_endpoint, [])
+      {"puts", [arg]} ->
+        remote_call(line, :"Elixir.Yup.Runtime", :puts, [arg])
+
+      {"map", [_, _]} ->
+        remote_call(line, :"Elixir.Yup.Runtime", :map, call_args)
+
+      {"select", [_, _]} ->
+        remote_call(line, :"Elixir.Yup.Runtime", :select, call_args)
+
+      {"new_endpoint", []} ->
+        remote_call(line, :"Elixir.Yup.Runtime", :new_endpoint, [])
+
       {"store_grant", [endpoint, grant]} ->
         remote_call(line, :"Elixir.Yup.Runtime", :store_grant, [endpoint, grant])
 
       {"redeem_grant", [_, _, _, _]} ->
         remote_call(line, :"Elixir.Yup.Runtime", :redeem_grant, call_args)
 
-      _ -> dispatch_call(name, call_args, line, function_names)
+      _ ->
+        dispatch_call(name, call_args, line, function_names)
     end
   end
 

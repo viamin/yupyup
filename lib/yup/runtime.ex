@@ -46,6 +46,7 @@ defmodule Yup.Runtime do
     use GenServer
 
     def new_endpoint, do: GenServer.call(server(), :new_endpoint)
+
     def store_grant(endpoint, grant) do
       GenServer.call(server(), {:store_grant, endpoint, grant})
     end
@@ -87,8 +88,12 @@ defmodule Yup.Runtime do
 
     defp redeem(grants, endpoint, code, redirect_uri, challenge) do
       case Map.fetch(grants, {endpoint, code}) do
-        :error -> {{:Error, "unknown code"}, grants}
-        {:ok, %{used: true}} -> {{:Error, "code already redeemed"}, grants}
+        :error ->
+          {{:Error, "unknown code"}, grants}
+
+        {:ok, %{used: true}} ->
+          {{:Error, "code already redeemed"}, grants}
+
         {:ok, %{redirect_uri: ^redirect_uri, challenge: ^challenge} = grant} ->
           redeemed = %{grant | used: true}
           {{:Redeemed, redeemed, "at-" <> code}, Map.put(grants, {endpoint, code}, redeemed)}
@@ -96,7 +101,8 @@ defmodule Yup.Runtime do
         {:ok, %{redirect_uri: redirect}} when redirect != redirect_uri ->
           {{:Error, "redirect uri mismatch"}, grants}
 
-        {:ok, _grant} -> {{:Error, "verifier mismatch"}, grants}
+        {:ok, _grant} ->
+          {{:Error, "verifier mismatch"}, grants}
       end
     end
   end
