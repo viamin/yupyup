@@ -44,27 +44,39 @@ and re-check the declared invariants, independently of `yup verify`.
   `INVARIANT InvariantN` line each) and the `java tlc2.TLC` command line.
 - **Expression translation.** Supported: the verifier's model expression
   subset minus strings and `nil`. Integers, booleans, atoms, field reads
-  (bare or `state.`), `+ - * /` (with `/` as integer division, so TLA+
-  `div`), `== != < <= > >=` (`<=` becomes `=<`, `!=` becomes `#`),
-  `and or not`, and ternaries. Atoms become distinct TLA+ strings
-  (`:known` becomes `"known"`). `and`/`or`/`not` and ternary conditions
-  must preserve YupYup truthiness (only `false` is falsy among exportable
-  values), so operands that are not statically boolean — comparisons,
-  boolean operators, and boolean literals are — render as
+  (bare or `state.`), `+ - * /`, `== != < <= > >=` (`<=` becomes `=<`, `!=`
+  becomes `#`), `and or not`, and ternaries. Atoms become distinct TLA+
+  strings (`:known` becomes `"known"`). `and`/`or`/`not` and ternary
+  conditions must preserve YupYup truthiness (only `false` is falsy among
+  exportable values), so operands that are not statically boolean —
+  comparisons, boolean operators, and boolean literals are — render as
   `(... # FALSE)` instead of being handed to TLC as booleans. A
   non-boolean invariant condition gets the same treatment at the top level.
+  `/` truncates toward zero (`Yup.Runtime.divide/2` is Elixir `div/2`), but
+  TLA+ `div` floors, so it renders as an `IF` expression that adds one back
+  to the floored quotient whenever the operands' signs differ and the
+  division isn't exact — the only case where flooring and truncating
+  disagree. Ordering comparisons (`< <= > >=`) reject operands that are
+  statically atoms or booleans, since TLC's ordering operators require
+  integers on both sides and `yup verify`'s Elixir term ordering accepts
+  more than TLA+ does; `==`/`!=` have no such restriction.
 - **Determinism.** Every line derives from AST declaration order; atoms
   render through `inspect/1` and set iteration is never used for output
   ordering. Exporting the same model twice yields identical bytes, which the
   golden tests pin.
 - **Rejections.** String literals, `nil`, unsupported expression shapes
-  (calls, lists, maps, records, matches), duplicate field assignment in one
-  transition, assignment to undeclared fields, unknown field reads,
-  initializer field reads, and names that cannot become TLA+ identifiers
-  (`?`/`!` are not identifier characters) or that collide with generated
-  definitions (`vars`, `Init`, `Next`, `Spec`, action names, and numbered
-  invariants) all fail with source-located diagnostics and a nonzero exit.
-  A file must contain exactly one model block, mirroring `yup verify`.
+  (calls, lists, maps, records, matches), bare expression statements (no
+  assignment) in transition bodies — `yup verify` accepts and evaluates
+  these for their side effects only, but a TLA+ action has no equivalent
+  for a statement with no effect on the primed variables — ordering
+  comparisons with a statically atom or boolean operand, duplicate field
+  assignment in one transition, assignment to undeclared fields, unknown
+  field reads, initializer field reads, and names that cannot become TLA+
+  identifiers (`?`/`!` are not identifier characters) or that collide with
+  generated definitions (`vars`, `Init`, `Next`, `Spec`, action names, and
+  numbered invariants) all fail with source-located diagnostics and a
+  nonzero exit. A file must contain exactly one model block, mirroring
+  `yup verify`.
 
 ## Non-goals (from the issue)
 

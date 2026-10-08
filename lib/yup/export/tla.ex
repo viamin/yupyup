@@ -41,8 +41,9 @@ defmodule Yup.Export.Tla do
 
   @reserved ~w(Init Next Spec vars)
   @boolean_ops ~w(== != < <= > >= and or)
+  @ordering_ops ~w(< <= > >=)
   @comparison %{"==" => "=", "!=" => "#", "<" => "<", "<=" => "=<", ">" => ">", ">=" => ">="}
-  @arithmetic %{"+" => "+", "-" => "-", "*" => "*", "/" => "div"}
+  @arithmetic %{"+" => "+", "-" => "-", "*" => "*"}
   @exportable_name ~r/^[a-z_][a-zA-Z0-9_]*$/
 
   @unsupported %{
@@ -323,8 +324,12 @@ defmodule Yup.Export.Tla do
     "\\* transition #{name}\n#{action} ==\n" <> Enum.join(lines, "\n") <> "\n\n"
   end
 
-  # The parser only produces state updates in transition bodies; anything
-  # else is a defensive rejection.
+  # The parser also accepts bare `state.field` expression statements (no
+  # `=`) in transition bodies, which `yup verify` evaluates and discards
+  # (lib/yup/verify/explorer.ex). TLA+ next-state actions have no equivalent
+  # for a statement with no effect on the primed variables, so this is a
+  # real subset restriction, not an unreachable defensive clause: models
+  # `yup verify` accepts with such statements are rejected here.
   defp transition_update(%StateUpdate{} = update, _env), do: update
 
   defp transition_update(node, env) do
@@ -404,10 +409,12 @@ defmodule Yup.Export.Tla do
   # @spec TLA-4
   defp render(node, ctx), do: raise(unsupported(node, ctx))
 
+  defp render_binary(%BinaryOp{op: "/"} = node, ctx), do: render_division(node, ctx)
+
   defp render_binary(%BinaryOp{op: op, left: left, right: right} = node, ctx) do
     cond do
       Map.has_key?(@comparison, op) ->
-        "(#{render(left, ctx)} #{@comparison[op]} #{render(right, ctx)})"
+        render_comparison(op, left, right, node, ctx)
 
       Map.has_key?(@arithmetic, op) ->
         "(#{render(left, ctx)} #{@arithmetic[op]} #{render(right, ctx)})"
@@ -419,6 +426,37 @@ defmodule Yup.Export.Tla do
       true ->
         raise unsupported(node, ctx, "'#{op}' operators")
     end
+  end
+
+  # YupYup `/` truncates toward zero (`Yup.Runtime.divide/2` is Elixir
+  # `div/2`), but TLA+ `div` floors, so `-1 / 2` would explore `0` in
+  # `yup verify` and `-1` in TLC. The floored quotient is adjusted by one
+  # whenever the operands' signs differ and the division isn't exact, which
+  # is exactly when flooring and truncating disagree.
+  # @spec TLA-3
+  defp render_division(%BinaryOp{left: left, right: right}, ctx) do
+    left_text = render(left, ctx)
+    right_text = render(right, ctx)
+    floor = "(#{left_text} div #{right_text})"
+    signs_differ = "(#{left_text} < 0) # (#{right_text} < 0)"
+    inexact = "(#{left_text} % #{right_text}) # 0"
+
+    "(IF #{signs_differ} /\\ #{inexact} THEN #{floor} + 1 ELSE #{floor})"
+  end
+
+  # TLC's ordering operators (`<`, `=<`, `>`, `>=`) require integer operands
+  # on both sides, but `yup verify` orders atoms and booleans too via Elixir
+  # term ordering. Operands that are statically known to be non-integer
+  # (atoms, booleans, or expressions guaranteed to produce one of those)
+  # would export to a module TLC aborts on, so they are rejected here;
+  # `==`/`!=` have no such restriction since TLC equality works across types.
+  # @spec TLA-4
+  defp render_comparison(op, left, right, node, ctx) do
+    if op in @ordering_ops and (non_integer_operand?(left) or non_integer_operand?(right)) do
+      raise unsupported(node, ctx, "ordering comparisons over non-integer operands")
+    end
+
+    "(#{render(left, ctx)} #{@comparison[op]} #{render(right, ctx)})"
   end
 
   defp render_read(name, node, ctx) do
@@ -463,6 +501,13 @@ defmodule Yup.Export.Tla do
     do: boolean_expr?(then_expr) and boolean_expr?(else_expr)
 
   defp boolean_expr?(_other), do: false
+
+  defp non_integer_operand?(%Literal{kind: :atom}), do: true
+
+  defp non_integer_operand?(%TernaryOp{then_expr: then_expr, else_expr: else_expr}),
+    do: non_integer_operand?(then_expr) and non_integer_operand?(else_expr)
+
+  defp non_integer_operand?(other), do: boolean_expr?(other)
 
   defp unsupported(node, ctx, description) do
     source_error(

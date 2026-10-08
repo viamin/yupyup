@@ -527,14 +527,24 @@ The export supports the `yup verify` expression subset minus strings and
 preserves YupYup semantics:
 
 - atoms become distinct TLA+ strings (`:known` becomes `"known"`);
-- `/` is integer division and becomes TLA+ `div`; `<=` becomes `=<`; `!=`
-  becomes `#`;
+- `/` truncates toward zero like `Yup.Runtime.divide/2` (Elixir `div/2`), but
+  TLA+ `div` floors, so `/` becomes an `IF` expression over `div` and `%`
+  that adds one back to the floored quotient whenever the operands' signs
+  differ and the division isn't exact — the only case where flooring and
+  truncating disagree; `<=` becomes `=<`; `!=` becomes `#`;
 - `and`, `or`, `not`, and ternary conditions test YupYup truthiness, so
   operands that are not statically boolean (everything except comparisons,
   boolean operators, and boolean literals) are compared against `FALSE`.
 
+Ordering comparisons (`< <= > >=`) require both operands to be statically
+non-atom and non-boolean, since TLC's ordering operators only accept
+integers, unlike `yup verify`'s Elixir term ordering; `==`/`!=` have no such
+restriction.
+
 Anything else fails with a source-located diagnostic and a nonzero exit:
-string and `nil` literals, calls and list/map/record expressions, assigning
+string and `nil` literals, calls and list/map/record expressions, bare
+expression statements (no assignment) in transition bodies, ordering
+comparisons over operands that are statically atoms or booleans, assigning
 the same field twice in one transition, and names that cannot become TLA+
 identifiers (such as `ok?`) or that collide with generated definitions
 (`vars`, `Init`, `Next`, `Spec`, and the numbered invariants). The file must
