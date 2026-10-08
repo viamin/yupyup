@@ -212,6 +212,29 @@ defmodule Yup.CLITest do
       assert output =~ "reached via: increment, increment, increment"
     end
 
+    # @spec INVARIANT-4
+    test "verifies auth-code single-use example with zero exit", %{yup: yup} do
+      assert {output, 0} =
+               System.cmd(yup, ["verify", "examples/auth_code.yup"], stderr_to_stdout: true)
+
+      assert output =~
+               "model AuthCode: exploration complete: 3 states, 6 transitions explored; " <>
+                 "1 invariant held at every explored state"
+    end
+
+    # @spec INVARIANT-3
+    test "reports broken auth-code model with a double-redemption counterexample", %{yup: yup} do
+      assert {output, 1} =
+               System.cmd(yup, ["verify", "examples/broken_auth_code.yup"],
+                 stderr_to_stdout: true
+               )
+
+      assert output =~ "examples/broken_auth_code.yup:4:1:"
+      assert output =~ ~s/invariant "authorization code is single-use" failed/
+      assert output =~ "counterexample state {issued: true, redemptions: 2}"
+      assert output =~ "reached via: issue, redeem, redeem"
+    end
+
     # @spec INVARIANT-5
     @tag :tmp_dir
     test "reports invariant evaluation errors with nonzero exit", %{
