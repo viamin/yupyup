@@ -9,9 +9,9 @@ defmodule Yup.Verify.Explorer do
   models are reported as incomplete searches rather than loops.
   """
 
-  alias Yup.AST.{Invariant, Model, ModelState, StateUpdate, Transition}
+  alias Yup.AST.{Invariant, Model}
   alias Yup.SourceError
-  alias Yup.Verify.{Evaluator, Failure, Result}
+  alias Yup.Verify.{Failure, Result, Semantics}
 
   @default_max_states 10_000
 
@@ -33,8 +33,7 @@ defmodule Yup.Verify.Explorer do
   end
 
   defp build_search(%Model{} = model, path, max_states) do
-    fields = Enum.map(model.states, & &1.name)
-    initial = build_initial(model, path, fields)
+    initial = Semantics.initial_state(model, path)
 
     canonical = Result.canonical_form(initial)
 
@@ -44,7 +43,7 @@ defmodule Yup.Verify.Explorer do
       max_states: max_states,
       transitions: model.transitions,
       invariants: build_invariants(model, path),
-      env: Evaluator.env(path, fields, %{}, :transition),
+      env: Semantics.transition_env(model, path),
       initial: initial,
       queue: :queue.in(canonical, :queue.new()),
       visited: MapSet.new([canonical]),
@@ -69,23 +68,6 @@ defmodule Yup.Verify.Explorer do
     Enum.reverse(ordered)
   end
 
-  # State initializers must be self-contained: Evaluator.eval rejects field
-  # reads in :initializer mode (clarifying answer A1).
-  defp build_initial(%Model{states: states}, path, fields) do
-    Enum.reduce(states, {%{}, MapSet.new()}, fn %ModelState{name: name} = declaration,
-                                                {initial, seen} ->
-      if MapSet.member?(seen, name) do
-        loc = declaration.loc && %{line: declaration.loc.line}
-        raise source_error(path, loc, "duplicate state field #{name}")
-      end
-
-      env = Evaluator.env(path, fields, %{}, :initializer)
-      value = Evaluator.eval(declaration.value, env)
-      {Map.put(initial, Evaluator.field_name(name), value), MapSet.put(seen, name)}
-    end)
-    |> elem(0)
-  end
-
   # At the cap we still drain the queue: queued states may only transition
   # back to states we've already visited, in which case the search is
   # complete. Incompleteness is reported the moment an expansion would add
@@ -108,27 +90,16 @@ defmodule Yup.Verify.Explorer do
   defp check_invariants(%{invariants: []}, _current), do: :ok
 
   defp check_invariants(search, current) do
-    state = Map.new(current)
+    case Semantics.check_invariants(search.invariants, Map.new(current), search.env) do
+      :ok ->
+        :ok
 
-    Enum.reduce_while(search.invariants, :ok, fn invariant, :ok ->
-      case eval_condition(invariant.condition, %{search.env | state: state}) do
-        {:ok, value} ->
-          if Yup.Runtime.truthy?(value) do
-            {:cont, :ok}
-          else
-            {:halt, {:error, invariant_failure(search, current, invariant)}}
-          end
+      {:error, {:invariant, invariant}} ->
+        {:error, invariant_failure(search, current, invariant)}
 
-        {:error, error} ->
-          {:halt, {:error, evaluation_failure(search, current, nil, error)}}
-      end
-    end)
-  end
-
-  defp eval_condition(condition, env) do
-    {:ok, Evaluator.eval(condition, env)}
-  rescue
-    error in SourceError -> {:error, error}
+      {:error, {:evaluation, error}} ->
+        {:error, evaluation_failure(search, current, nil, error)}
+    end
   end
 
   defp expand(queue, search, current) do
@@ -136,7 +107,7 @@ defmodule Yup.Verify.Explorer do
 
     outcome =
       Enum.reduce_while(search.transitions, initial, fn transition, {:ok, {queue, search}} ->
-        case apply_transition(transition, Map.new(current), search.env) do
+        case Semantics.apply(transition, Map.new(current), search.env) do
           {:ok, next} ->
             case add_successor(queue, search, current, transition.name, next) do
               {:ok, {queue, search}} -> {:cont, {:ok, {queue, search}}}
@@ -179,28 +150,8 @@ defmodule Yup.Verify.Explorer do
   end
 
   # Transition bodies apply sequentially: each state update evaluates against
-  # the state as mutated by the previous statements of the same body.
-  defp apply_transition(%Transition{body: body}, state, env) do
-    Enum.reduce_while(body, {:ok, state}, fn
-      %StateUpdate{name: name} = update, {:ok, working} ->
-        field = Evaluator.field_name(name)
-
-        if MapSet.member?(env.fields, field) do
-          value = Evaluator.eval(update.value, %{env | state: working})
-          {:cont, {:ok, Map.put(working, field, value)}}
-        else
-          {:halt,
-           {:error,
-            source_error(env.path, update.loc, "assignment to undeclared state field #{name}")}}
-        end
-
-      expression, {:ok, working} ->
-        Evaluator.eval(expression, %{env | state: working})
-        {:cont, {:ok, working}}
-    end)
-  rescue
-    error in SourceError -> {:error, error}
-  end
+  # the state as mutated by the previous statements of the same body
+  # (Yup.Verify.Semantics.apply/3, shared with the trace checker).
 
   defp result(search, complete) do
     %Result{

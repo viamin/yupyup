@@ -98,9 +98,15 @@ when the PKCE verifier's derived challenge matches the stored one. Running it
 prints a transcript of the happy path and every refusal (wrong verifier,
 redirect mismatch, code reuse). It stays deliberately small — in-memory
 storage, deterministic codes and tokens, an abstract hash derivation — as a
-verified-protocol demo, not a production server. See
-[The OAuth Runtime Example](docs/LANGUAGE.md#the-oauth-runtime-example) in
-the language docs for the toy subset and its non-goals.
+verified-protocol demo, not a production server. The trace tests relate its
+behavior back to the two models event by event: each runtime observation is
+mapped onto model transitions (`test/support/oauth_trace.ex`) and checked
+against them, and `examples/broken_oauth_runtime.yup` is the deliberately
+broken counterpart that demonstrates the check fails. See
+[The OAuth Runtime Example](docs/LANGUAGE.md#the-oauth-runtime-example) and
+[Trace Checking The Runtime Against The Models](docs/LANGUAGE.md#trace-checking-the-runtime-against-the-models)
+in the language docs for the toy subset, its non-goals, and the
+event-to-transition mapping.
 
 ## Test
 

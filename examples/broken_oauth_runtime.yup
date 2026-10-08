@@ -1,0 +1,114 @@
+# OAuth authorization-code + PKCE runtime slice, broken on purpose.
+#
+# This is the deliberately bad counterpart to examples/oauth_runtime.yup:
+# the token endpoint mints a token from every refused exchange — wrong
+# verifier, redirect mismatch, code reuse, unknown code. The authorization
+# endpoint, the endpoint-owned store, and the PKCE derivation are the
+# same as the good runtime; only `redeem` lies.
+#
+# The trace conformance tests (issue #23) feed this fixture's events to
+# the verified models through the same mapping as the good runtime and
+# assert the check fails: a token on a mismatched verifier contradicts
+# PkceExchange's `not token_issued or verifier == :matching`, and a
+# re-minted code contradicts AuthCode's `redemptions <= 1`. Where
+# examples/oauth_runtime.yup conforms, this file must disagree.
+#
+# Same toy caveats as the good runtime: one client, one grant slot,
+# deterministic codes and tokens, an abstract hash, no HTTP.
+
+record Client
+  client_id
+  redirect_uri
+end
+
+record Grant
+  code
+  redirect_uri
+  challenge
+  used
+end
+
+record Server
+  client
+  grant
+  endpoint
+end
+
+def derive(verifier)
+  "s256:" + verifier
+end
+
+def new_server(client_id, redirect_uri)
+  client = Client.new(client_id: client_id, redirect_uri: redirect_uri)
+  grant = Grant.new(code: "", redirect_uri: "", challenge: "", used: false)
+  Server.new(client: client, grant: grant, endpoint: new_endpoint())
+end
+
+def with_grant(server, grant)
+  Server.new(client: server.client, grant: grant, endpoint: server.endpoint)
+end
+
+def issue(server, client_id, redirect_uri, challenge)
+  match server.client.client_id == client_id and server.client.redirect_uri == redirect_uri
+  when true
+    pending = Grant.new(code: "ac-" + client_id, redirect_uri: redirect_uri, challenge: challenge, used: false)
+    grant = store_grant(server.endpoint, pending)
+    Ok(with_grant(server, grant))
+  when false
+    Error("unregistered client or redirect uri")
+  end
+end
+
+# Broken: the exchange result is discarded on refusal and a token is
+# minted anyway. Everything the models forbid happens here.
+def redeem(server, code, redirect_uri, verifier)
+  result = redeem_grant(server.endpoint, code, redirect_uri, derive(verifier))
+  match result
+  when Redeemed(grant, token)
+    Redeemed(with_grant(server, grant), token)
+  when Error(reason)
+    Redeemed(server, "at-" + code)
+  end
+end
+
+def show(result)
+  match result
+  when Ok(issued)
+    "issued code " + issued.grant.code
+  when Error(reason)
+    "refused: " + reason
+  end
+end
+
+def show_exchange(result)
+  match result
+  when Redeemed(exchanged, token)
+    "token " + token
+  when Error(reason)
+    "refused: " + reason
+  end
+end
+
+def unwrap_ok(result, fallback)
+  match result
+  when Ok(value)
+    value
+  when Error(reason)
+    fallback
+  end
+end
+
+# The demo transcript: every refusal of the good runtime is a token here.
+verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+server = new_server("toy-client", "https://app.example/cb")
+
+puts "broken redeem wrong verifier: " + show_exchange(redeem(server, "ac-toy-client", "https://app.example/cb", "plain-wrong-verifier"))
+
+authorized = issue(server, "toy-client", "https://app.example/cb", derive(verifier))
+granted = unwrap_ok(authorized, server)
+puts "broken redeem redirect mismatch: " + show_exchange(redeem(granted, granted.grant.code, "https://evil.example/cb", verifier))
+
+exchanged = redeem(granted, granted.grant.code, "https://app.example/cb", verifier)
+puts "broken redeem correct verifier: " + show_exchange(exchanged)
+
+puts "broken redeem the same code again: " + show_exchange(redeem(granted, granted.grant.code, "https://app.example/cb", verifier))
