@@ -36,7 +36,15 @@ without a TLA+ install.
   failure, or an exploration truncated by the state cap — is reported as
   a cross-check `error` entry with the verifier's diagnostic and exits
   nonzero (TLA-XC-6), because a truncated run and a complete TLC pass are
-  not comparable. TLC's verdict is its exit status.
+  not comparable. TLC's verdict is classified, not read off its exit
+  status: exit 0 is a pass, and a nonzero exit is a fail only when TLC's
+  output reports an invariant violation (`Invariant <name> is violated`),
+  because TLC also exits nonzero for tool and spec errors — an unparsable
+  module, an evaluation failure, exhausted resources. A nonzero exit
+  without a reported violation is no verdict at all, so it becomes a
+  cross-check `error` entry carrying TLC's exit status and an excerpt of
+  its output (TLA-XC-6) instead of silent agreement on the broken
+  fixtures.
 - **Export before TLC.** For each file the runner exports the module
   with `Yup.Export.Tla.export_file/1`, writes it as `<Model>.tla` plus a
   generated `<Model>.cfg` (`SPECIFICATION Spec` and one `INVARIANT
@@ -78,13 +86,16 @@ Tests inject a fake TLC through `YUP_TLC` (a `sh` shim that records
 whether `<Model>.tla` and `<Model>.cfg` exist at invocation time and
 fails models run from `broken_*` run directories), so skip behavior,
 export-before-TLC ordering, agreement including the broken fixtures, and
-disagreement reporting are all covered without a TLA+ install. A
-`:tlc`-tagged test runs the real cross-check whenever `find_tlc/0`
-succeeds; `test/test_helper.exs` excludes it otherwise (TLA-XC-1).
+disagreement reporting are all covered without a TLA+ install. The
+failing shim echoes TLC's invariant-violation message — a bare nonzero
+exit is not a fail verdict — and shims that exit nonzero without one are
+asserted to surface as errors, not agreement. A `:tlc`-tagged test runs
+the real cross-check whenever `find_tlc/0` succeeds;
+`test/test_helper.exs` excludes it otherwise (TLA-XC-1).
 
 ## Module map
 
 ```text
-Yup.Crosscheck.Tla  find_tlc/0,1; crosscheck/3; exit_code/1; report/1; main/1
+Yup.Crosscheck.Tlc  find_tlc/0,1; crosscheck/3; exit_code/1; report/1; main/1
 bin/tlc-crosscheck  sh wrapper -> mix run -> Yup.Crosscheck.Tlc.main/1
 ```

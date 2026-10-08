@@ -13,7 +13,8 @@ modules this cross-check replays in TLC. Depends on #20.
 - [x] **TLA-XC-2**: When TLC is available, the cross-check shall, for each
   model file, run the YupYup verifier, export the TLA+ module and generate
   the companion `.cfg` into a working directory, run TLC in that directory,
-  and record agreement when both checkers pass the model or both fail it.
+  and record agreement when both checkers pass the model or both report an
+  invariant violation.
 - [x] **TLA-XC-3**: When the two checkers disagree on any file — one
   reports failure where the other passes — the cross-check shall print a
   `DISAGREEMENT` line naming the file, both checkers' outcomes, and an
@@ -26,8 +27,12 @@ modules this cross-check replays in TLC. Depends on #20.
   `examples/pkce_exchange.yup`, `examples/broken_auth_code.yup`, and
   `examples/broken_pkce_exchange.yup`, with the deliberately broken
   fixtures expected to fail on both checkers.
-- [x] **TLA-XC-6**: When the YupYup verifier cannot produce a verdict
-  (unreadable file, parse error, evaluation failure, or an exploration
-  that hit its state cap) or the model cannot be exported, the cross-check
-  shall report that file as an error rather than agreement or
+- [x] **TLA-XC-6**: When either checker cannot produce a verdict — the
+  YupYup verifier cannot (unreadable file, parse error, evaluation
+  failure, or an exploration that hit its state cap), the model cannot be
+  exported, or TLC cannot (it could not be run, or it exited nonzero
+  without reporting an invariant violation, which means a tool or spec
+  error such as an unparsable module rather than a safety failure) — the
+  cross-check shall report that file as an error, including TLC's output
+  in the diagnostic when TLC ran, rather than as agreement or
   disagreement, and shall exit nonzero.

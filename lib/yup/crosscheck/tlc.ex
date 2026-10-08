@@ -8,8 +8,9 @@ defmodule Yup.Crosscheck.Tlc do
   each model this module runs `Yup.Verify.verify_file/2` in-process,
   writes `Yup.Export.Tla.export_file/1` output plus a companion `.cfg`
   into a working directory, runs TLC there, and compares verdicts.
-  Agreement means both checkers passed the model or both failed it;
-  disagreement and anything that is not a verdict are reported loudly.
+  Agreement means both checkers passed the model or both reported an
+  invariant violation; disagreement and anything that is not a verdict
+  are reported loudly.
 
   TLC is optional. `find_tlc/1` locates an installation through the
   `YUP_TLC` environment variable or the `java` + `CLASSPATH` tla2tools
@@ -31,6 +32,7 @@ defmodule Yup.Crosscheck.Tlc do
 
   @module_header ~r/^-+ MODULE ([A-Za-z0-9_]+) -+$/m
   @invariant_definition ~r/^(Invariant\d+) ==/m
+  @invariant_violation ~r/Invariant \S+ is violated/
   @excerpt_lines 10
 
   @doc """
@@ -90,9 +92,12 @@ defmodule Yup.Crosscheck.Tlc do
   - `:file`, `:model` — the source path and the exported model name
   - `:yup` — `:pass`, `:fail`, or `:none` (the verifier produced no
     verdict: the file could not be read, parsed, or fully explored)
-  - `:tlc` — TLC's exit status, or nil when TLC was not run
+  - `:tlc` — TLC's exit status, or nil when TLC could not be run; a
+    nonzero status is only a fail verdict when TLC's output reports an
+    invariant violation
   - `:status` — `:agree`, `:disagree`, or `:error`
-  - `:detail` — explanation for `:error` entries, nil otherwise
+  - `:detail` — explanation for `:error` entries, including an excerpt
+    of TLC's output when TLC ran but produced no verdict, nil otherwise
   - `:tlc_output` — TLC's combined output, kept for disagreement excerpts
   - `:work_dir` — the per-file run directory (named after the source
     basename) holding the exports and TLC's artifacts
@@ -193,22 +198,8 @@ defmodule Yup.Crosscheck.Tlc do
       ["SPECIFICATION Spec\n" | config_invariants(module_text)]
     )
 
-    case run_tlc(tlc, model, run_dir) do
-      {tlc_output, nil} ->
-        error_result(file, tlc_output, run_dir)
-
-      {tlc_output, tlc_status} ->
-        %{
-          file: file,
-          model: model,
-          yup: verdict,
-          tlc: tlc_status,
-          status: status(verdict, tlc_status),
-          detail: nil,
-          tlc_output: tlc_output,
-          work_dir: run_dir
-        }
-    end
+    {tlc_output, tlc_status} = run_tlc(tlc, model, run_dir)
+    compare_verdicts(file, model, verdict, tlc_output, tlc_status, run_dir)
   end
 
   defp config_invariants(module_text) do
@@ -235,12 +226,61 @@ defmodule Yup.Crosscheck.Tlc do
     end
   end
 
-  defp status(verdict, tlc_status) do
-    if agree?(verdict, tlc_status), do: :agree, else: :disagree
+  # TLC exits nonzero for invariant violations and for tool or spec
+  # errors alike — an unparsable module, an evaluation failure, exhausted
+  # resources. Only TLC reporting an invariant violation confirms a fail
+  # verdict; any other nonzero exit leaves the independent check unusable
+  # and becomes a cross-check error carrying TLC's output instead of
+  # silent agreement on the broken fixtures (TLA-XC-6).
+  # @spec TLA-XC-2
+  # @spec TLA-XC-6
+  defp compare_verdicts(file, model, verdict, tlc_output, tlc_status, run_dir) do
+    case tlc_verdict(tlc_output, tlc_status) do
+      {:ok, tlc_verdict} ->
+        %{
+          file: file,
+          model: model,
+          yup: verdict,
+          tlc: tlc_status,
+          status: status(verdict, tlc_verdict),
+          detail: nil,
+          tlc_output: tlc_output,
+          work_dir: run_dir
+        }
+
+      {:error, detail} ->
+        %{
+          file: file,
+          model: model,
+          yup: verdict,
+          tlc: tlc_status,
+          status: :error,
+          detail: detail,
+          tlc_output: tlc_output,
+          work_dir: run_dir
+        }
+    end
   end
 
-  defp agree?(verdict, tlc_status) do
-    (verdict == :pass and tlc_status == 0) or (verdict == :fail and tlc_status != 0)
+  defp tlc_verdict(_tlc_output, 0), do: {:ok, :pass}
+
+  defp tlc_verdict(tlc_output, tlc_status) do
+    if tlc_output =~ @invariant_violation,
+      do: {:ok, :fail},
+      else: {:error, no_verdict_detail(tlc_status, tlc_output)}
+  end
+
+  # A nil status means TLC could not be run at all; run_tlc/3 has already
+  # formatted why, and tlc_output carries that message.
+  defp no_verdict_detail(nil, tlc_output), do: tlc_output
+
+  defp no_verdict_detail(tlc_status, tlc_output) do
+    "TLC exited #{tlc_status} without reporting an invariant violation, so it " <>
+      "produced no comparable verdict; TLC output:\n" <> excerpt(tlc_output)
+  end
+
+  defp status(yup_verdict, tlc_verdict) do
+    if yup_verdict == tlc_verdict, do: :agree, else: :disagree
   end
 
   defp error_result(file, detail, run_dir) do

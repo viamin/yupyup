@@ -12,9 +12,12 @@ defmodule Yup.Crosscheck.TlcTest do
 
   # A fake TLC that records whether the exported .tla and companion .cfg
   # exist at invocation time (TLA-XC-4), echoes their contents into the
-  # log, and fails models whose per-file run directory starts with
-  # `broken_` (the deliberately broken fixtures), so agreement — including
-  # "both checkers fail" — can be exercised without a TLA+ install.
+  # log, and — like real TLC — reports an invariant violation and exits 1
+  # for models whose per-file run directory starts with `broken_` (the
+  # deliberately broken fixtures), so agreement — including "both
+  # checkers fail" — can be exercised without a TLA+ install. A bare
+  # nonzero exit is not a fail verdict, so the shim must print TLC's
+  # invariant-violation message too.
   @recording_shim ~S"""
   #!/bin/sh
   tla=no
@@ -26,7 +29,13 @@ defmodule Yup.Crosscheck.TlcTest do
     head -n 1 "$1.tla" >> "$FAKE_TLC_LOG"
     cat "$1.cfg" >> "$FAKE_TLC_LOG"
   fi
-  case "$(basename "$(pwd)")" in broken_*) exit 1 ;; *) exit 0 ;; esac
+  case "$(basename "$(pwd)")" in
+    broken_*)
+      printf 'Error: Invariant Invariant1 is violated by the initial state:\n'
+      exit 1
+      ;;
+    *) exit 0 ;;
+  esac
   """
 
   describe "find_tlc/1" do
@@ -160,6 +169,79 @@ defmodule Yup.Crosscheck.TlcTest do
       assert Yup.Crosscheck.Tlc.exit_code([result]) == 1
     end
 
+    # @spec TLA-XC-3
+    @tag :tmp_dir
+    test "disagrees when TLC reports a violation yup does not find", %{tmp_dir: tmp_dir} do
+      shim =
+        write_shim(
+          tmp_dir,
+          "#!/bin/sh\necho 'Error: Invariant Invariant1 is violated by the initial state:'\nexit 1\n"
+        )
+
+      [result] =
+        Yup.Crosscheck.Tlc.crosscheck(["examples/auth_code.yup"], [shim], work_dir: tmp_dir)
+
+      assert result.status == :disagree
+      assert result.yup == :pass
+      assert result.tlc == 1
+      assert Yup.Crosscheck.Tlc.exit_code([result]) == 1
+    end
+
+    # TLC exits nonzero for tool and spec errors too (here: an unparsable
+    # module), so only a reported invariant violation confirms yup's fail
+    # verdict — anything else is an error, never agreement.
+    # @spec TLA-XC-6
+    @tag :tmp_dir
+    test "reports a nonzero TLC exit without a violation as an error, not agreement", %{
+      tmp_dir: tmp_dir
+    } do
+      shim = write_shim(tmp_dir, "#!/bin/sh\necho 'Error: Parse error on line 3'\nexit 1\n")
+      file = "examples/broken_auth_code.yup"
+
+      [result] = Yup.Crosscheck.Tlc.crosscheck([file], [shim], work_dir: tmp_dir)
+
+      assert result.status == :error
+      assert result.yup == :fail
+      assert result.tlc == 1
+      assert result.detail =~ "without reporting an invariant violation"
+      assert result.detail =~ "Parse error on line 3"
+      assert Yup.Crosscheck.Tlc.exit_code([result]) == 1
+
+      report = Yup.Crosscheck.Tlc.report([result])
+      assert report =~ "error     examples/broken_auth_code.yup:"
+      assert report =~ "0/1 models agree"
+    end
+
+    # @spec TLA-XC-6
+    @tag :tmp_dir
+    test "reports an unusable TLC outcome as an error when yup passes", %{tmp_dir: tmp_dir} do
+      shim = write_shim(tmp_dir, "#!/bin/sh\necho 'Error: Out of memory'\nexit 1\n")
+
+      [result] =
+        Yup.Crosscheck.Tlc.crosscheck(["examples/auth_code.yup"], [shim], work_dir: tmp_dir)
+
+      assert result.status == :error
+      assert result.yup == :pass
+      assert result.tlc == 1
+      assert result.detail =~ "Out of memory"
+      assert Yup.Crosscheck.Tlc.exit_code([result]) == 1
+    end
+
+    # @spec TLA-XC-6
+    @tag :tmp_dir
+    test "reports TLC that cannot be executed as an error", %{tmp_dir: tmp_dir} do
+      missing = Path.join(tmp_dir, "no-such-tlc")
+
+      [result] =
+        Yup.Crosscheck.Tlc.crosscheck(["examples/auth_code.yup"], [missing], work_dir: tmp_dir)
+
+      assert result.status == :error
+      assert result.yup == :pass
+      assert result.tlc == nil
+      assert result.detail =~ "could not run TLC"
+      assert Yup.Crosscheck.Tlc.exit_code([result]) == 1
+    end
+
     @tag :tlc
     @tag :tmp_dir
     test "cross-checks the example models with a real TLC install", %{tmp_dir: tmp_dir} do
@@ -248,6 +330,20 @@ defmodule Yup.Crosscheck.TlcTest do
                  "yup failed (invariant) but tlc passed"
 
       assert output =~ "2/4 models agree"
+    end
+
+    # @spec TLA-XC-6
+    @tag :tmp_dir
+    test "does not claim agreement when TLC fails without a violation", %{tmp_dir: tmp_dir} do
+      shim = write_shim(tmp_dir, "#!/bin/sh\necho 'Error: Parse error on line 3'\nexit 1\n")
+
+      assert {output, 1} = run_script(%{"YUP_TLC" => shim})
+
+      refute output =~ "4/4 models agree"
+      assert output =~ "0/4 models agree"
+      assert output =~ "error     examples/broken_auth_code.yup:"
+      assert output =~ "TLC exited 1 without reporting an invariant violation"
+      assert output =~ "    Error: Parse error on line 3"
     end
 
     # @spec TLA-XC-6
