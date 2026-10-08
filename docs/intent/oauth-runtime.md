@@ -65,8 +65,10 @@ running code — the endpoint store's consumed grant plays `redemptions <= 1`,
 and the `derive(verifier) == challenge` check plays
 `verifier == :matching`. The models remain the checked artifacts; the
 example makes the rules runnable and inspectable, and is the anchor the
-tests below pin to. Neither proves the other — that relationship is
-documentation, not verification.
+tests below pin to. Neither proves the other — that relationship was
+documentation until #23 made it checkable: the trace conformance tests
+now map this runtime's events onto those models' transitions and fail
+on disagreement (see [oauth-trace.md](oauth-trace.md)).
 
 ## Non-goals (from the issue)
 

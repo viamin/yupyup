@@ -13,7 +13,7 @@ GitHub issues are intended to be the source of truth for actionable work once th
 9. Add actor request/reply semantics, crash semantics, links, monitors, and supervision.
 10. ~~Add abstract model and transition AST.~~ (done, #8)
 11. Build a tiny finite-state explorer for `yup verify`.
-12. Add invariants, nondeterminism, modeled environments, assumption reporting, `yup find`, monitors, and refinement research. *(Named invariants checked during `yup verify` exploration now ship in the bootstrap, #10; a TLA+ export path for cross-checking finite models with an external TLC install ships as well, #20, along with an optional TLC cross-check script that replays `yup verify` verdicts against it, #21, and an executable OAuth authorization-code + PKCE runtime slice that relates the verified protocol models to runnable code, #22; the rest remain.)*
+12. Add invariants, nondeterminism, modeled environments, assumption reporting, `yup find`, monitors, and refinement research. *(Named invariants checked during `yup verify` exploration now ship in the bootstrap, #10; a TLA+ export path for cross-checking finite models with an external TLC install ships as well, #20, along with an optional TLC cross-check script that replays `yup verify` verdicts against it, #21, an executable OAuth authorization-code + PKCE runtime slice that relates the verified protocol models to runnable code, #22, and test-time trace conformance that checks the runtime's events against those same models, #23; the rest remain.)*
 
 Syntax and semantics should remain reversible while implementation experience is still sparse.
 

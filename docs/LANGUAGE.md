@@ -638,7 +638,8 @@ code: the endpoint store's consumed grant plays `redemptions <= 1` from
 `examples/auth_code.yup`, and the `derive(verifier) == challenge` check plays
 `verifier == :matching` from `examples/pkce_exchange.yup`. The models remain
 the checked artifacts; the example makes the rules runnable. Neither proves
-the other.
+the other, but the trace check below relates them event by event — which is
+checking, not proof.
 
 This is a **toy subset** of OAuth, not a server. Its non-goals, deliberate
 and permanent for this example:
@@ -653,6 +654,63 @@ and permanent for this example:
   means a second authorization overwrites the first.
 - External conformance suite integration; error results are reason
   strings, not OAuth 2.0 error codes.
+
+### Trace Checking The Runtime Against The Models
+
+The test suite connects this runtime back to the verified models with a
+trace check: each runtime observation is mapped to model transitions and
+the models are stepped through them, so a runtime that permits behavior
+the models forbid fails the suite. `Yup.Verify.Trace` is the generic
+engine; the OAuth-specific mapping lives in `test/support/oauth_trace.ex`
+(`Yup.OAuthTrace`), and `test/oauth_trace_test.exs` drives it.
+
+The event mapping, stated once:
+
+| Runtime event                                | AuthCode           | PkceExchange                  |
+| -------------------------------------------- | ------------------ | ----------------------------- |
+| issue → Ok                                   | `issue`, issued    | — (stutter)                   |
+| issue → Error                                | — (stutter)        | — (stutter)                   |
+| redeem, matching verifier, Redeemed          | `redeem`, +1       | `submit_valid_verifier`, token |
+| redeem, any verifier, refused (reuse)        | `redeem` (guard)   | — (stutter)                   |
+| redeem, matching verifier, refused (other)   | — (stutter)        | — (stutter)                   |
+| redeem, wrong verifier, Redeemed             | `redeem`, +1       | `submit_invalid_verifier`, token |
+| redeem, wrong verifier, refused              | — (stutter)        | `submit_invalid_verifier`, no token |
+| redeem, unknown code, Redeemed               | `redeem`, +1       | `submit_valid_verifier`, token |
+| redeem, unknown code, refused                | — (stutter)        | — (stutter)                   |
+
+Three rules govern it. Mapped **transitions are chosen from the event's
+inputs** — which code was submitted, whether the verifier derives to the
+stored challenge — except a terminal reuse refusal (which the store
+detects before the verifier, so it takes priority over input
+classification and maps to `AuthCode.redeem`'s guard), and never from
+the outcome, so a runtime that succeeds on inputs the model rejects
+still maps to the model's refusal transition and disagrees by
+construction. **Claims are chosen from the outcome**: a minted token
+claims `token_issued`, a consumed code claims a redemption, whatever
+the runtime's internals did. And **refusals may do less than the model
+permits**: a refused exchange maps to the model's own refusal encoding
+— `submit_invalid_verifier`, or `AuthCode.redeem`'s guard for a reused
+code — or stutters; conformance only fails when the runtime does what
+the model forbids.
+
+Each mapped event is checked by stepping the models through
+`Yup.Verify.Semantics` — the same code `yup verify` uses to apply
+transitions — rechecking invariants at every step, then comparing the
+claims against the model states the steps actually produced. Any
+mismatch, invariant violation, or evaluation error is a *disagreement*
+and the session stops at its last conforming event.
+
+`examples/broken_oauth_runtime.yup` is the deliberately bad counterpart:
+its token endpoint mints a token from every refused exchange, and the
+tests assert the check fails on it three ways — a token on a wrong
+verifier contradicts `PkceExchange`, and both a re-minted code and a
+token for an unknown code contradict `AuthCode`'s single-use rule.
+
+This is **trace checking, not refinement**: it runs only on the concrete
+traces the tests feed it, the gluing relation (the mapping and its
+claims) is supplied rather than proved, and it sees only what the models
+model — client registration and redirect URIs are invisible to it and
+remain covered by the runtime's own tests.
 
 ## Proposed And Unresolved
 
