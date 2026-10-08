@@ -21,3 +21,7 @@ jobs:
       # TLC cross-check's skip path end to end: it must print why it is
       # skipping and exit 0.
       - run: bin/tlc-crosscheck
+      # The OAuth conformance harness has no external install requirement
+      # for its local manifest: CI runs the full interop check, and the
+      # external-suite plan is simply not configured (skip path).
+      - run: bin/oauth-conformance

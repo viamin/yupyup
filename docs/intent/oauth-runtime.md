@@ -74,9 +74,11 @@ on disagreement (see [oauth-trace.md](oauth-trace.md)).
 
 OpenID Connect ID tokens, refresh tokens, dynamic client registration,
 multiple tenants/issuers, production cryptographic key management,
-external conformance suite integration — and, inherited from the toy:
-HTTP, persistence, expiry, randomness, scopes, client secrets, or being
-listened to by anything.
+external conformance suite integration at the runtime level (the #24
+harness documents exactly what such a suite can and cannot check
+against the toy — see [oauth-conformance.md](oauth-conformance.md)) —
+and, inherited from the toy: HTTP, persistence, expiry, randomness,
+scopes, client secrets, or being listened to by anything.
 
 ## Testing
 

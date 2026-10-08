@@ -100,13 +100,21 @@ redirect mismatch, code reuse). It stays deliberately small — in-memory
 storage, deterministic codes and tokens, an abstract hash derivation — as a
 verified-protocol demo, not a production server. The trace tests relate its
 behavior back to the two models event by event: each runtime observation is
-mapped onto model transitions (`test/support/oauth_trace.ex`) and checked
+mapped onto model transitions (`lib/yup/oauth_trace.ex`) and checked
 against them, and `examples/broken_oauth_runtime.yup` is the deliberately
-broken counterpart that demonstrates the check fails. See
-[The OAuth Runtime Example](docs/LANGUAGE.md#the-oauth-runtime-example) and
-[Trace Checking The Runtime Against The Models](docs/LANGUAGE.md#trace-checking-the-runtime-against-the-models)
-in the language docs for the toy subset, its non-goals, and the
-event-to-transition mapping.
+broken counterpart that demonstrates the check fails. A second outside view
+is `bin/oauth-conformance` (#24): an interoperability harness that replays
+RFC-anchored conformance cases against the runtime in protocol shape — every
+step also checked against the verified models through the same mapping — and,
+when `YUP_OIDF_SUITE` names an OpenID Foundation Conformance Suite deployment
+URL or checkout, writes the byte-stable `plan.json` hand-off for a manual
+suite run; without it the external part skips cleanly. See
+[The OAuth Runtime Example](docs/LANGUAGE.md#the-oauth-runtime-example),
+[Trace Checking The Runtime Against The Models](docs/LANGUAGE.md#trace-checking-the-runtime-against-the-models),
+and [OAuth Interoperability Harness](docs/LANGUAGE.md#oauth-interoperability-harness)
+in the language docs for the toy subset, its non-goals, the
+event-to-transition mapping, and the supported/unsupported conformance case
+tables.
 
 ## Test
 
@@ -116,7 +124,11 @@ mix test
 
 The TLC cross-check test runs only when a TLC installation is available
 (`YUP_TLC`, or `java` with `tla2tools.jar` on `CLASSPATH`); otherwise it
-is excluded, so the suite passes without a TLA+ install.
+is excluded, so the suite passes without a TLA+ install. The OAuth
+conformance harness runs its full local manifest in every test run
+(`test/conformance/oauth_test.exs`); its external-suite `plan.json` is
+written only when `YUP_OIDF_SUITE` is set, so it too passes without an
+external install.
 
 ## Example
 
