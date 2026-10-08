@@ -187,6 +187,54 @@ defmodule Yup.VerifyTest do
     assert Verify.Failure.format(failure) =~ "counterexample state {count: 3}"
   end
 
+  # ── pkce exchange model (#19) ───────────────────────────────────────
+
+  # @spec VERIFY-4
+  # @spec INVARIANT-4
+  test "verify_file explores the shipped pkce exchange example" do
+    assert {:ok, result} = Verify.verify_file("examples/pkce_exchange.yup")
+
+    assert result.model_name == "PkceExchange"
+    assert result.states == 3
+    assert result.transitions == 6
+    assert result.complete == true
+    assert result.invariants == ["token requires matching verifier"]
+
+    # The valid-verifier path is the only way to reach an issued token.
+    assert {:ok, ["submit_valid_verifier"]} =
+             Verify.Result.trace_to(result, %{
+               challenge: :known,
+               verifier: :matching,
+               token_issued: true
+             })
+
+    # The invalid-verifier path never issues a token.
+    assert {:ok, ["submit_invalid_verifier"]} =
+             Verify.Result.trace_to(result, %{
+               challenge: :known,
+               verifier: :wrong,
+               token_issued: false
+             })
+
+    refute Enum.any?(Verify.Result.states(result), fn {_id, state} ->
+             state.token_issued and state.verifier != :matching
+           end)
+  end
+
+  # @spec INVARIANT-3
+  test "verify_file reports a pkce token issued from an invalid verifier" do
+    assert {:error, %Verify.Failure{kind: :invariant} = failure} =
+             Verify.verify_file("examples/broken_pkce_exchange.yup")
+
+    assert failure.invariant == "token requires matching verifier"
+    assert failure.state == %{challenge: :known, verifier: :wrong, token_issued: true}
+    assert failure.trace == ["submit_invalid_verifier"]
+    assert failure.diagnostic.line == 13
+
+    assert Verify.Failure.format(failure) =~
+             "counterexample state {challenge: :known, token_issued: true, verifier: :wrong}"
+  end
+
   # ── program-level API ───────────────────────────────────────────────
 
   # @spec VERIFY-1

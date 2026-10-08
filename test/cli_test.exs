@@ -235,6 +235,32 @@ defmodule Yup.CLITest do
       assert output =~ "reached via: issue, redeem, redeem"
     end
 
+    # @spec INVARIANT-4
+    test "verifies pkce exchange example with zero exit", %{yup: yup} do
+      assert {output, 0} =
+               System.cmd(yup, ["verify", "examples/pkce_exchange.yup"], stderr_to_stdout: true)
+
+      assert output =~
+               "model PkceExchange: exploration complete: 3 states, 6 transitions explored; " <>
+                 "1 invariant held at every explored state"
+    end
+
+    # @spec INVARIANT-3
+    test "reports broken pkce model with an invalid-verifier counterexample", %{yup: yup} do
+      assert {output, 1} =
+               System.cmd(yup, ["verify", "examples/broken_pkce_exchange.yup"],
+                 stderr_to_stdout: true
+               )
+
+      assert output =~ "examples/broken_pkce_exchange.yup:13:1:"
+      assert output =~ ~s/invariant "token requires matching verifier" failed/
+
+      assert output =~
+               "counterexample state {challenge: :known, token_issued: true, verifier: :wrong}"
+
+      assert output =~ "reached via: submit_invalid_verifier"
+    end
+
     # @spec INVARIANT-5
     @tag :tmp_dir
     test "reports invariant evaluation errors with nonzero exit", %{

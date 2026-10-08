@@ -1,0 +1,26 @@
+# PKCE token exchange without the verifier check: a negative fixture.
+#
+# Same abstraction as examples/pkce_exchange.yup: challenge and verifier are
+# abstract atoms and the cryptographic check is out of scope. Here the server
+# issues the token even when the submitted verifier does not match the stored
+# challenge, so verification fails with a counterexample state that carries
+# an issued token and a wrong verifier.
+model PkceExchange
+  state challenge = :known
+  state verifier = :unknown
+  state token_issued = false
+
+  invariant "token requires matching verifier" do
+    not token_issued or verifier == :matching
+  end
+
+  transition submit_valid_verifier do
+    state.verifier = :matching
+    state.token_issued = true
+  end
+
+  transition submit_invalid_verifier do
+    state.verifier = :wrong
+    state.token_issued = true
+  end
+end
