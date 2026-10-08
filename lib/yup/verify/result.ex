@@ -1,6 +1,7 @@
 defmodule Yup.Verify.Result do
   @moduledoc """
-  Outcome of a completed-or-aborted exploration: counts plus the predecessor
+  Outcome of a completed-or-aborted exploration: counts, the names of any
+  invariants that held at every explored state, and the predecessor
   information needed to reconstruct transition paths.
 
   States are canonicalized as the field list sorted by name, which is the
@@ -18,7 +19,8 @@ defmodule Yup.Verify.Result do
     transitions: 0,
     complete: true,
     order: [],
-    parents: %{}
+    parents: %{},
+    invariants: []
   ]
 
   def complete?(%__MODULE__{complete: complete}), do: complete

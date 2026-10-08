@@ -189,6 +189,54 @@ defmodule Yup.CLITest do
       assert output =~ "reached via: increment, increment, increment"
     end
 
+    # @spec INVARIANT-4
+    test "verifies passing invariant example with zero exit", %{yup: yup} do
+      assert {output, 0} =
+               System.cmd(yup, ["verify", "examples/invariants.yup"], stderr_to_stdout: true)
+
+      assert output =~
+               "model Light: exploration complete: 2 states, 2 transitions explored; " <>
+                 "1 invariant held at every explored state"
+    end
+
+    # @spec INVARIANT-3
+    test "reports invariant failures with counterexample and nonzero exit", %{yup: yup} do
+      assert {output, 1} =
+               System.cmd(yup, ["verify", "examples/broken_invariant.yup"],
+                 stderr_to_stdout: true
+               )
+
+      assert output =~ "examples/broken_invariant.yup:4:1:"
+      assert output =~ ~s/invariant "count stays below 3" failed/
+      assert output =~ "counterexample state {count: 3}"
+      assert output =~ "reached via: increment, increment, increment"
+    end
+
+    # @spec INVARIANT-5
+    @tag :tmp_dir
+    test "reports invariant evaluation errors with nonzero exit", %{
+      tmp_dir: tmp_dir,
+      yup: yup
+    } do
+      path = Path.join(tmp_dir, "boom_invariant.yup")
+
+      File.write!(path, """
+      model Boomer
+        state count = 0
+
+        invariant "no division by zero" do
+          1 / 0 == 1
+        end
+      end
+      """)
+
+      assert {output, 1} = System.cmd(yup, ["verify", path], stderr_to_stdout: true)
+
+      assert output =~ "division by zero in model expression"
+      assert output =~ "while evaluating an invariant at state {count: 0}"
+      assert output =~ "reached via: initial state"
+    end
+
     # @spec VERIFY-6
     test "rejects an invalid max-states value", %{yup: yup} do
       assert {output, 1} =

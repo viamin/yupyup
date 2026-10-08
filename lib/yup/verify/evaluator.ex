@@ -5,7 +5,8 @@ defmodule Yup.Verify.Evaluator do
   Supported: literals, current-state reads through bare field names or
   `state.field`, unary and binary operators, and ternaries. Calls to top-level
   `def` functions and every other expression shape are rejected with a
-  source-located diagnostic.
+  source-located diagnostic. Invariant conditions (issue #10) evaluate
+  through this same subset and the language's documented truthiness.
 
   This evaluator is deliberately separate from BEAM compilation: models are
   non-executable descriptions consumed by the verifier, not lowered code.

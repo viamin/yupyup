@@ -1,0 +1,11 @@
+model Light
+  state value = :off
+
+  invariant "value is on or off" do
+    value == :on or value == :off
+  end
+
+  transition toggle do
+    state.value = value == :off ? :on : :off
+  end
+end

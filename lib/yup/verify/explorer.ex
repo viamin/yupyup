@@ -4,11 +4,12 @@ defmodule Yup.Verify.Explorer do
 
   Explores from the initial state, deduplicates states by canonical form, and
   records each state's predecessor and producing transition so traces can be
-  reconstructed for upcoming invariant work. Enforces a maximum-state cap so
-  unbounded models are reported as incomplete searches rather than loops.
+  reconstructed. Invariant conditions (issue #10) are checked at every
+  dequeued state, shortest-first. Enforces a maximum-state cap so unbounded
+  models are reported as incomplete searches rather than loops.
   """
 
-  alias Yup.AST.{Model, ModelState, StateUpdate, Transition}
+  alias Yup.AST.{Invariant, Model, ModelState, StateUpdate, Transition}
   alias Yup.SourceError
   alias Yup.Verify.{Evaluator, Failure, Result}
 
@@ -17,6 +18,7 @@ defmodule Yup.Verify.Explorer do
   def default_max_states, do: @default_max_states
 
   # @spec VERIFY-4
+  # @spec INVARIANT-2
   def explore(%Model{} = model, opts \\ []) do
     path = Keyword.get(opts, :path)
     max_states = Keyword.get(opts, :max_states, @default_max_states)
@@ -41,6 +43,7 @@ defmodule Yup.Verify.Explorer do
       path: path,
       max_states: max_states,
       transitions: model.transitions,
+      invariants: build_invariants(model, path),
       env: Evaluator.env(path, fields, %{}, :transition),
       initial: initial,
       queue: :queue.in(canonical, :queue.new()),
@@ -49,6 +52,21 @@ defmodule Yup.Verify.Explorer do
       order: [canonical],
       edges: 0
     }
+  end
+
+  # Invariants share the duplicate-name rule state fields already have.
+  defp build_invariants(%Model{invariants: invariants}, path) do
+    {ordered, _seen} =
+      Enum.reduce(invariants, {[], MapSet.new()}, fn %Invariant{name: name} = declaration,
+                                                     {ordered, seen} ->
+        if MapSet.member?(seen, name) do
+          raise source_error(path, declaration.loc, "duplicate invariant name \"#{name}\"")
+        end
+
+        {[declaration | ordered], MapSet.put(seen, name)}
+      end)
+
+    Enum.reverse(ordered)
   end
 
   # State initializers must be self-contained: Evaluator.eval rejects field
@@ -77,8 +95,40 @@ defmodule Yup.Verify.Explorer do
       {:ok, result(search, true)}
     else
       {{:value, current}, queue} = :queue.out(queue)
-      expand(queue, search, current)
+
+      case check_invariants(search, current) do
+        :ok -> expand(queue, search, current)
+        {:error, failure} -> {:error, failure}
+      end
     end
+  end
+
+  # Invariants are checked as states are dequeued, so the initial state is
+  # covered and the first violation found carries a shortest trace (BFS).
+  defp check_invariants(%{invariants: []}, _current), do: :ok
+
+  defp check_invariants(search, current) do
+    state = Map.new(current)
+
+    Enum.reduce_while(search.invariants, :ok, fn invariant, :ok ->
+      case eval_condition(invariant.condition, %{search.env | state: state}) do
+        {:ok, value} ->
+          if Yup.Runtime.truthy?(value) do
+            {:cont, :ok}
+          else
+            {:halt, {:error, invariant_failure(search, current, invariant)}}
+          end
+
+        {:error, error} ->
+          {:halt, {:error, evaluation_failure(search, current, nil, error)}}
+      end
+    end)
+  end
+
+  defp eval_condition(condition, env) do
+    {:ok, Evaluator.eval(condition, env)}
+  rescue
+    error in SourceError -> {:error, error}
   end
 
   defp expand(queue, search, current) do
@@ -162,7 +212,8 @@ defmodule Yup.Verify.Explorer do
       transitions: search.edges,
       complete: complete,
       order: Enum.reverse(search.order),
-      parents: search.parents
+      parents: search.parents,
+      invariants: Enum.map(search.invariants, & &1.name)
     }
   end
 
@@ -188,6 +239,21 @@ defmodule Yup.Verify.Explorer do
       diagnostic: error,
       state: Map.new(current),
       transition: name,
+      trace: Result.trace(search.parents, current)
+    }
+  end
+
+  # A counterexample is a concrete reachable state, so the failure reports
+  # it and the trace without any boundedness qualifier.
+  defp invariant_failure(search, current, invariant) do
+    message = "invariant \"#{invariant.name}\" failed"
+
+    %Failure{
+      kind: :invariant,
+      diagnostic: source_error(search.path, invariant.loc, message),
+      state: Map.new(current),
+      transition: nil,
+      invariant: invariant.name,
       trace: Result.trace(search.parents, current)
     }
   end

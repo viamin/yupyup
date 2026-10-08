@@ -46,6 +46,34 @@ defmodule Yup.Verify.ExplorerTest do
   end
   """
 
+  @light_invariants """
+  model Light
+    state value = :off
+
+    invariant "value is on or off" do
+      value == :on or value == :off
+    end
+
+    transition toggle do
+      state.value = value == :off ? :on : :off
+    end
+  end
+  """
+
+  @counter_bound """
+  model Counter
+    state count = 0
+
+    invariant "count stays below 3" do
+      count < 3
+    end
+
+    transition increment do
+      state.count = count + 1
+    end
+  end
+  """
+
   defp explore(source, opts \\ []) do
     {:ok, program} = Parser.parse(source, path: "model.yup")
     [model] = program.models
@@ -224,6 +252,243 @@ defmodule Yup.Verify.ExplorerTest do
 
     assert {:error, %Failure{kind: :evaluation} = failure} = explore(source)
     assert failure.diagnostic.message =~ "assignment to undeclared state field valua"
+  end
+
+  # ── invariant checking ──────────────────────────────────────────────
+
+  # @spec INVARIANT-2
+  test "checks a passing invariant at every explored state" do
+    assert {:ok, %Result{} = result} = explore(@light_invariants)
+
+    assert result.states == 2
+    assert result.invariants == ["value is on or off"]
+  end
+
+  # @spec INVARIANT-2
+  test "checks invariants in declaration order and records held names" do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "on or off" do
+        value == :on or value == :off
+      end
+
+      invariant "not purple" do
+        value != :purple
+      end
+    end
+    """
+
+    assert {:ok, result} = explore(source)
+    assert result.invariants == ["on or off", "not purple"]
+  end
+
+  # @spec INVARIANT-2
+  test "checks invariants at the initial state when there are no transitions" do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "starts off" do
+        value == :off
+      end
+    end
+    """
+
+    assert {:ok, result} = explore(source)
+    assert result.states == 1
+    assert result.invariants == ["starts off"]
+  end
+
+  # @spec INVARIANT-2
+  test "uses language truthiness for invariant conditions" do
+    source = """
+    model Truthy
+      state value = :off
+
+      invariant "atoms are truthy" do
+        value
+      end
+    end
+    """
+
+    assert {:ok, result} = explore(source)
+    assert result.invariants == ["atoms are truthy"]
+  end
+
+  # @spec INVARIANT-2
+  test "fails when the condition evaluates to nil" do
+    source = """
+    model NilState
+      state value = nil
+
+      invariant "value present" do
+        value
+      end
+    end
+    """
+
+    assert {:error, %Failure{kind: :invariant, invariant: "value present"}} = explore(source)
+  end
+
+  # @spec INVARIANT-3
+  test "reports initial-state violations with an empty trace" do
+    source = """
+    model Light
+      state value = :purple
+
+      invariant "value is on or off" do
+        value == :on or value == :off
+      end
+
+      transition toggle do
+        state.value = :off
+      end
+    end
+    """
+
+    assert {:error, %Failure{kind: :invariant} = failure} = explore(source)
+
+    assert failure.invariant == "value is on or off"
+    assert failure.state == %{value: :purple}
+    assert failure.trace == []
+    assert failure.diagnostic.line == 4
+    assert failure.diagnostic.message =~ ~s/invariant "value is on or off" failed/
+  end
+
+  # @spec INVARIANT-3
+  test "formats invariant failures with the counterexample trace" do
+    assert {:error, %Failure{} = failure} = explore(@counter_bound)
+
+    formatted = Failure.format(failure)
+
+    assert formatted =~ "model.yup:4:1:"
+    assert formatted =~ ~s/invariant "count stays below 3" failed/
+    assert formatted =~ "counterexample state {count: 3}"
+    assert formatted =~ "reached via: increment, increment, increment"
+  end
+
+  # @spec INVARIANT-7
+  test "reports a shortest counterexample when violations sit at different depths" do
+    source = """
+    model Counter
+      state count = 0
+
+      invariant "count stays below 3" do
+        count < 3
+      end
+
+      transition increment do
+        state.count = count + 1
+      end
+
+      transition jump do
+        state.count = count + 3
+      end
+    end
+    """
+
+    assert {:error, %Failure{kind: :invariant} = failure} = explore(source)
+
+    assert failure.state == %{count: 3}
+    assert failure.trace == ["jump"]
+  end
+
+  # @spec INVARIANT-3
+  test "reports the first failing invariant in declaration order" do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "holds" do
+        value == :off
+      end
+
+      invariant "fails" do
+        value == :purple
+      end
+    end
+    """
+
+    assert {:error, %Failure{kind: :invariant} = failure} = explore(source)
+    assert failure.invariant == "fails"
+  end
+
+  # @spec INVARIANT-5
+  test "evaluation errors inside invariants keep the state and trace" do
+    source = """
+    model Boomer
+      state count = 0
+
+      invariant "no division by zero" do
+        1 / 0 == 1
+      end
+
+      transition increment do
+        state.count = count + 1
+      end
+    end
+    """
+
+    assert {:error, %Failure{kind: :evaluation} = failure} = explore(source)
+
+    assert failure.state == %{count: 0}
+    assert failure.trace == []
+    assert failure.transition == nil
+    assert failure.diagnostic.message =~ "division by zero in model expression"
+
+    formatted = Failure.format(failure)
+
+    assert formatted =~ "model.yup:5:"
+    assert formatted =~ "while evaluating an invariant at state {count: 0}"
+    assert formatted =~ "reached via: initial state"
+  end
+
+  # @spec INVARIANT-5
+  test "unknown fields in invariants are source-located evaluation errors" do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "typo" do
+        valu == :off
+      end
+    end
+    """
+
+    assert {:error, %Failure{kind: :evaluation} = failure} = explore(source)
+    assert failure.diagnostic.message =~ "unknown state field valu"
+    assert failure.diagnostic.line == 5
+  end
+
+  # @spec INVARIANT-6
+  test "rejects duplicate invariant names with location" do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "same" do
+        value == :off
+      end
+
+      invariant "same" do
+        value == :on
+      end
+    end
+    """
+
+    assert {:error, %Failure{kind: :evaluation} = failure} = explore(source)
+    assert failure.diagnostic.message =~ ~s/duplicate invariant name "same"/
+    assert failure.diagnostic.line == 8
+  end
+
+  # @spec INVARIANT-2
+  test "checks invariants when the search completes exactly at the cap" do
+    assert {:ok, %Result{} = result} = explore(@light_invariants, max_states: 2)
+
+    assert Result.complete?(result)
+    assert result.invariants == ["value is on or off"]
   end
 
   # ── self-contained initializers ─────────────────────────────────────
