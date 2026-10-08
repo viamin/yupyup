@@ -217,8 +217,8 @@ defmodule Yup.VerifyTest do
              })
 
     refute Enum.any?(Verify.Result.states(result), fn {_id, state} ->
-      state.token_issued and state.verifier != :matching
-    end)
+             state.token_issued and state.verifier != :matching
+           end)
   end
 
   # @spec INVARIANT-3
