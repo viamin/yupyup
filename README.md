@@ -34,6 +34,7 @@ This creates an executable named `yup` in the project root.
 ./yup run examples/records.yup
 ./yup run examples/dot_calls.yup
 ./yup run examples/collections.yup
+./yup run examples/oauth_runtime.yup
 ./yup verify examples/light.yup
 ./yup verify --max-states 100 examples/counter.yup
 ./yup verify examples/invariants.yup
@@ -89,6 +90,17 @@ cleanly:
 ```sh
 YUP_TLC='java -cp /opt/tla2tools.jar tlc2.TLC' bin/tlc-crosscheck
 ```
+
+`examples/oauth_runtime.yup` is the executable counterpart to those verified
+models: a toy OAuth runtime slice that issues an authorization code only for
+the registered client's exact redirect URI, redeems it exactly once, and only
+when the PKCE verifier's derived challenge matches the stored one. Running it
+prints a transcript of the happy path and every refusal (wrong verifier,
+redirect mismatch, code reuse). It stays deliberately small — in-memory
+storage, deterministic codes and tokens, an abstract hash derivation — as a
+verified-protocol demo, not a production server. See
+[The OAuth Runtime Example](docs/LANGUAGE.md#the-oauth-runtime-example) in
+the language docs for the toy subset and its non-goals.
 
 ## Test
 
