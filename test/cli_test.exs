@@ -142,11 +142,14 @@ defmodule Yup.CLITest do
 
     # @spec VERIFY-5
     test "verifies light example with zero exit", %{yup: yup} do
-      assert {output, 0} = System.cmd(yup, ["verify", "examples/light.yup"], stderr_to_stdout: true)
+      assert {output, 0} =
+               System.cmd(yup, ["verify", "examples/light.yup"], stderr_to_stdout: true)
+
       assert output =~ "model Light: exploration complete: 2 states, 2 transitions explored"
     end
 
     # @spec VERIFY-6
+    @tag :tmp_dir
     test "reports incomplete exploration with nonzero exit", %{tmp_dir: tmp_dir, yup: yup} do
       path = Path.join(tmp_dir, "counter.yup")
       File.write!(path, @counter)
@@ -161,6 +164,7 @@ defmodule Yup.CLITest do
     end
 
     # @spec VERIFY-1
+    @tag :tmp_dir
     test "reports a file with no model with nonzero exit", %{tmp_dir: tmp_dir, yup: yup} do
       path = Path.join(tmp_dir, "no_model.yup")
       File.write!(path, "puts 1\n")
@@ -170,6 +174,7 @@ defmodule Yup.CLITest do
     end
 
     # @spec VERIFY-7
+    @tag :tmp_dir
     test "reports evaluation failures with trace context and nonzero exit", %{
       tmp_dir: tmp_dir,
       yup: yup

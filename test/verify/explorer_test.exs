@@ -118,7 +118,7 @@ defmodule Yup.Verify.ExplorerTest do
       [state: :final] => {[state: :middle], "second"}
     }
 
-    assert Result.trace(parents, [state: :final]) == ["first", "second"]
+    assert Result.trace(parents, state: :final) == ["first", "second"]
   end
 
   # @spec VERIFY-4
@@ -164,7 +164,9 @@ defmodule Yup.Verify.ExplorerTest do
   # @spec VERIFY-6
   test "rejects non-positive max-states values" do
     for max_states <- [0, -1] do
-      assert {:error, %Failure{kind: :evaluation} = failure} = explore(@light, max_states: max_states)
+      assert {:error, %Failure{kind: :evaluation} = failure} =
+               explore(@light, max_states: max_states)
+
       assert failure.diagnostic.message =~ "--max-states must be a positive integer"
     end
   end

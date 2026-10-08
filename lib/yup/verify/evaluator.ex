@@ -34,8 +34,18 @@ defmodule Yup.Verify.Evaluator do
 
   # @spec VERIFY-2
   def env(path, fields, state, mode) do
-    %__MODULE__{path: path, fields: MapSet.new(fields), state: state, mode: mode}
+    %__MODULE__{
+      path: path,
+      fields: MapSet.new(fields, &field_name/1),
+      state: Map.new(state, fn {key, value} -> {field_name(key), value} end),
+      mode: mode
+    }
   end
+
+  # State field names cross the parser boundary as strings but the verify
+  # domain keys states by atom, so canonicalize once at each entry point.
+  def field_name(name) when is_binary(name), do: String.to_atom(name)
+  def field_name(name) when is_atom(name), do: name
 
   # @spec VERIFY-2
   def eval(%Literal{value: value}, _env), do: value
@@ -58,7 +68,7 @@ defmodule Yup.Verify.Evaluator do
 
   def eval(node, env), do: raise(unsupported(node, env))
 
-  defp eval_binary(%BinaryOp{op: op, left: left, right: right} = node, env) do
+  defp eval_binary(%BinaryOp{left: left, right: right} = node, env) do
     left_value = eval(left, env)
     right_value = eval(right, env)
     apply_binary(node, env, {left_value, right_value})
@@ -87,15 +97,21 @@ defmodule Yup.Verify.Evaluator do
   defp apply_op("or", left, right), do: Yup.Runtime.or_op(left, right)
 
   defp read_field(name, node, env) do
+    field = field_name(name)
+
     cond do
-      not MapSet.member?(env.fields, name) ->
+      not MapSet.member?(env.fields, field) ->
         raise source_error(env.path, node.loc, "unknown state field #{name}")
 
       env.mode == :initializer ->
-        raise source_error(env.path, node.loc, "state initializers cannot read state fields (#{name})")
+        raise source_error(
+                env.path,
+                node.loc,
+                "state initializers cannot read state fields (#{name})"
+              )
 
       true ->
-        Map.fetch!(env.state, name)
+        Map.fetch!(env.state, field)
     end
   end
 

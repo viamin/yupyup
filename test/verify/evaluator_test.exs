@@ -57,7 +57,8 @@ defmodule Yup.Verify.EvaluatorTest do
 
     Enum.reduce_while(transition.body, {:ok, state}, fn
       %Yup.AST.StateUpdate{name: name, value: value}, {:ok, working} ->
-        {:cont, {:ok, Map.put(working, name, Evaluator.eval(value, %{env | state: working}))}}
+        field = Evaluator.field_name(name)
+        {:cont, {:ok, Map.put(working, field, Evaluator.eval(value, %{env | state: working}))}}
 
       expr, {:ok, working} ->
         Evaluator.eval(expr, %{env | state: working})

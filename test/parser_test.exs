@@ -819,7 +819,10 @@ defmodule Yup.ParserTest do
     assert {:ok, %Program{models: [%Model{transitions: [transition]}]}} =
              Yup.Parser.parse(source, path: "model.yup")
 
-    assert [%StateUpdate{value: %Identifier{name: "b"}}, %StateUpdate{value: %StateAccess{name: "a"}}] =
+    assert [
+             %StateUpdate{value: %Identifier{name: "b"}},
+             %StateUpdate{value: %StateAccess{name: "a"}}
+           ] =
              transition.body
   end
 

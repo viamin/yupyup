@@ -48,7 +48,7 @@ defmodule Yup.Verify.Result do
   end
 
   # @spec VERIFY-4
-  def trace_to(%__MODULE__{parents: parents} = result, target) do
+  def trace_to(%__MODULE__{parents: parents}, target) do
     canonical = canonical_form(target)
 
     if Map.has_key?(parents, canonical) do

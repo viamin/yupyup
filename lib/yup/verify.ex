@@ -15,9 +15,16 @@ defmodule Yup.Verify do
   alias Yup.Verify.{Explorer, Result}
 
   def verify_file(path, opts \\ []) do
-    with {:ok, source} <- File.read(path),
+    with {:ok, source} <- read_source(path),
          {:ok, program} <- Yup.Parser.parse(source, path: path) do
       verify_program(program, opts)
+    end
+  end
+
+  defp read_source(path) do
+    case File.read(path) do
+      {:ok, source} -> {:ok, source}
+      {:error, reason} -> {:error, %File.Error{action: "read", path: path, reason: reason}}
     end
   end
 

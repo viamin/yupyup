@@ -49,6 +49,7 @@ defmodule Yup.VerifyTest do
   # ── exactly one model ───────────────────────────────────────────────
 
   # @spec VERIFY-1
+  @tag :tmp_dir
   test "rejects a file with no model", %{tmp_dir: tmp_dir} do
     path = write_model(tmp_dir, "no_model.yup", "puts 1\n")
 
@@ -57,6 +58,7 @@ defmodule Yup.VerifyTest do
   end
 
   # @spec VERIFY-1
+  @tag :tmp_dir
   test "rejects a file with multiple models", %{tmp_dir: tmp_dir} do
     path = write_model(tmp_dir, "two_models.yup", @light <> "\n" <> @light)
 
@@ -65,6 +67,7 @@ defmodule Yup.VerifyTest do
   end
 
   # @spec VERIFY-1
+  @tag :tmp_dir
   test "does not execute coexisting executable code", %{tmp_dir: tmp_dir} do
     path = write_model(tmp_dir, "mixed.yup", @light <> ~s(\nputs "must not run"\n))
 
@@ -73,6 +76,7 @@ defmodule Yup.VerifyTest do
   end
 
   # @spec VERIFY-1
+  @tag :tmp_dir
   test "propagates parse errors as source errors", %{tmp_dir: tmp_dir} do
     path = write_model(tmp_dir, "bad.yup", "model Light\n  state value = \nend\n")
 
@@ -87,6 +91,7 @@ defmodule Yup.VerifyTest do
   # ── bounded exploration and failures through the entry point ────────
 
   # @spec VERIFY-6
+  @tag :tmp_dir
   test "honors the max-states option", %{tmp_dir: tmp_dir} do
     counter = """
     model Counter
@@ -110,6 +115,7 @@ defmodule Yup.VerifyTest do
   end
 
   # @spec VERIFY-6
+  @tag :tmp_dir
   test "rejects a non-positive max-states option", %{tmp_dir: tmp_dir} do
     path = write_model(tmp_dir, "light.yup", @light)
 
@@ -118,6 +124,7 @@ defmodule Yup.VerifyTest do
   end
 
   # @spec VERIFY-3
+  @tag :tmp_dir
   test "rejects self-referential state initializers end to end", %{tmp_dir: tmp_dir} do
     chained = """
     model Chain

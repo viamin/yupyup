@@ -55,14 +55,15 @@ defmodule Yup.Verify.Explorer do
   # reads in :initializer mode (clarifying answer A1).
   defp build_initial(%Model{states: states}, path, fields) do
     Enum.reduce(states, {%{}, MapSet.new()}, fn %ModelState{name: name} = declaration,
-                                               {initial, seen} ->
+                                                {initial, seen} ->
       if MapSet.member?(seen, name) do
-        raise source_error(path, declaration.loc, "duplicate state field #{name}")
+        loc = declaration.loc && %{line: declaration.loc.line}
+        raise source_error(path, loc, "duplicate state field #{name}")
       end
 
       env = Evaluator.env(path, fields, %{}, :initializer)
       value = Evaluator.eval(declaration.value, env)
-      {Map.put(initial, name, value), MapSet.put(seen, name)}
+      {Map.put(initial, Evaluator.field_name(name), value), MapSet.put(seen, name)}
     end)
     |> elem(0)
   end
@@ -132,11 +133,15 @@ defmodule Yup.Verify.Explorer do
   defp apply_transition(%Transition{body: body}, state, env) do
     Enum.reduce_while(body, {:ok, state}, fn
       %StateUpdate{name: name} = update, {:ok, working} ->
-        if MapSet.member?(env.fields, name) do
+        field = Evaluator.field_name(name)
+
+        if MapSet.member?(env.fields, field) do
           value = Evaluator.eval(update.value, %{env | state: working})
-          {:cont, {:ok, Map.put(working, name, value)}}
+          {:cont, {:ok, Map.put(working, field, value)}}
         else
-          {:halt, {:error, source_error(env.path, update.loc, "assignment to undeclared state field #{name}")}}
+          {:halt,
+           {:error,
+            source_error(env.path, update.loc, "assignment to undeclared state field #{name}")}}
         end
 
       expression, {:ok, working} ->
@@ -195,6 +200,9 @@ defmodule Yup.Verify.Explorer do
 
   defp source_error(path, %{line: line, column: column}, message),
     do: SourceError.exception(path: path, line: line, column: column, message: message)
+
+  defp source_error(path, %{line: line}, message),
+    do: SourceError.exception(path: path, line: line, message: message)
 
   defp source_error(path, _loc, message),
     do: SourceError.exception(path: path, message: message)

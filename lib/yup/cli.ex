@@ -43,7 +43,11 @@ defmodule Yup.CLI do
         end
 
       {_opts, files, []} ->
-        IO.puts(:stderr, "yup verify takes exactly one FILE, got: #{Enum.join(files, " ")}\n\n" <> usage())
+        IO.puts(
+          :stderr,
+          "yup verify takes exactly one FILE, got: #{Enum.join(files, " ")}\n\n" <> usage()
+        )
+
         exit({:shutdown, 1})
 
       {_opts, _files, invalid} ->
