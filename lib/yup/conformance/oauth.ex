@@ -286,7 +286,7 @@ defmodule Yup.Conformance.OAuth do
   defp step_event(event, rest, state, index, outcome) do
     case Trace.event(state.session, event) do
       {:ok, session} ->
-        run_steps(rest, advance(state, outcome), index + 1)
+        run_steps(rest, %{advance(state, outcome) | session: session}, index + 1)
 
       {:error, disagreement} ->
         %{protocol: :pass, models: {:disagree, Trace.Disagreement.format(disagreement)}}
@@ -406,11 +406,18 @@ defmodule Yup.Conformance.OAuth do
   end
 
   # The commit is optional pinning evidence: a checkout without git
-  # metadata (or a machine without git) pins the path alone.
+  # metadata (or a machine without git) pins the path alone. The
+  # top-level guard matters because rev-parse from a plain directory
+  # reports the nearest *enclosing* repository: only a checkout that is
+  # itself a repo's top level pins that repo's commit (OAUTH-CF-5).
   defp git_commit(dir) do
-    case System.cmd("git", ["-C", dir, "rev-parse", "HEAD"], stderr_to_stdout: true) do
-      {commit, 0} -> String.trim(commit)
-      {_output, _status} -> nil
+    case System.cmd("git", ["-C", dir, "rev-parse", "--show-toplevel", "HEAD"], stderr_to_stdout: true) do
+      {output, 0} ->
+        [top, commit] = output |> String.trim() |> String.split("\n")
+        if top == Path.absname(dir), do: commit, else: nil
+
+      {_output, _status} ->
+        nil
     end
   rescue
     _error -> nil
