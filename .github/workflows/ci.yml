@@ -17,3 +17,7 @@ jobs:
           elixir-version: "1.20"
       - run: mix format --check-formatted
       - run: mix test
+      # GitHub runners ship Java but no TLA+ install, so this exercises the
+      # TLC cross-check's skip path end to end: it must print why it is
+      # skipping and exit 0.
+      - run: bin/tlc-crosscheck

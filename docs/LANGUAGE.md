@@ -564,9 +564,48 @@ java tlc2.TLC AuthCode
 ```
 
 `examples/auth_code.yup` and `examples/pkce_exchange.yup` both export
-cleanly. Temporal properties, refinement checking, and automating or
-vendoring TLC are out of scope: the export is a text artifact, and running
-the external checker is up to your TLC installation.
+cleanly. Temporal properties, refinement checking, and installing or
+vendoring TLC are out of scope: TLC comes from your own TLA+ installation.
+
+### Automated Cross-Check
+
+`bin/tlc-crosscheck` automates that manual loop: for each model it runs
+the YupYup verifier, exports the TLA+ module and generates the companion
+`.cfg` into a working directory, runs TLC there, and compares the two
+checkers' pass/fail verdicts. With no arguments it checks the finite
+safety examples — including the deliberately broken fixtures, which both
+checkers must fail:
+
+```sh
+bin/tlc-crosscheck                    # the four example models
+bin/tlc-crosscheck my/model.yup       # or your own files
+```
+
+TLC is found through the `YUP_TLC` environment variable (word-split, so
+it can carry a classpath) or through `java` on `PATH` with
+`tla2tools.jar` on `CLASSPATH`:
+
+```sh
+export YUP_TLC='java -cp /opt/tla2tools.jar tlc2.TLC'
+# or: export CLASSPATH=/opt/tla2tools.jar   # with java on PATH
+```
+
+Agreement prints one `agree` line per file (`yup failed (invariant),
+tlc exited 1` is agreement — both checkers rejected the model). Any file
+where one checker passes and the other fails prints a `DISAGREEMENT`
+line with both outcomes and an excerpt of TLC's output, and the script
+exits 1; the same goes for files the verifier cannot give a verdict on
+(unreadable, unparsable, evaluation failure, or an exploration that hit
+its state cap) or that cannot be exported. When no TLC installation is
+found the script prints why and exits 0, so CI and local test runs skip
+cleanly without a TLA+ install; `mix test` likewise excludes its
+TLC-dependent test.
+
+The trust boundary this draws: `yup verify` and `yup export tla` share
+the same parser and model semantics, so neither can catch a bug in the
+other. TLC replaying the exported module is the independent check — but
+both only ever speak about the same finite state graph, never about
+unbounded behavior of the real system.
 
 ## Proposed And Unresolved
 
