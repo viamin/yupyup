@@ -30,16 +30,6 @@ defmodule Yup.Runtime do
   def map(list, fun) when is_list(list), do: Enum.map(list, fun)
   def select(list, fun) when is_list(list), do: Enum.filter(list, fun)
 
-  # OAuth's code-consumption rule cannot rely on the caller replacing an
-  # immutable Server record. The store serializes requests, so a retained
-  # snapshot, or two concurrent callers, cannot redeem a code more than once.
-  def new_endpoint, do: Store.new_endpoint()
-
-  def store_grant(endpoint, grant), do: Store.store_grant(endpoint, grant)
-
-  def redeem_grant(endpoint, code, redirect_uri, challenge),
-    do: Store.redeem_grant(endpoint, code, redirect_uri, challenge)
-
   defmodule Store do
     @moduledoc false
 
@@ -106,6 +96,16 @@ defmodule Yup.Runtime do
       end
     end
   end
+
+  # OAuth's code-consumption rule cannot rely on the caller replacing an
+  # immutable Server record. The store serializes requests, so a retained
+  # snapshot, or two concurrent callers, cannot redeem a code more than once.
+  def new_endpoint, do: Store.new_endpoint()
+
+  def store_grant(endpoint, grant), do: Store.store_grant(endpoint, grant)
+
+  def redeem_grant(endpoint, code, redirect_uri, challenge),
+    do: Store.redeem_grant(endpoint, code, redirect_uri, challenge)
 
   # Lists and maps print as `[1, 2, 3]` / `{name: "Ada"}` rather than going
   # through IO.puts's charlist/Chars heuristics directly, since a YupYup list
