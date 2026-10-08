@@ -6,10 +6,11 @@
 # exact redirect URI matching at both endpoints, single-use authorization
 # codes, and a PKCE verifier check at the token endpoint.
 #
-# It is a toy, not a server: storage is one in-memory grant slot threaded
-# through immutable server records, codes and tokens are deterministic
-# because the toy has no randomness, and derive(verifier) below stands in
-# for BASE64URL(SHA256(verifier)) exactly as the model abstracts the hash.
+# It is a toy, not a server: storage is one in-memory grant slot owned by
+# the endpoint (and reflected in immutable server records), codes and tokens
+# are deterministic because the toy has no randomness. `derive(verifier)`
+# below stands in for BASE64URL(SHA256(verifier)) exactly as the model
+# abstracts the hash.
 # No HTTP, no expiry, no refresh tokens, no ID tokens, no secrets.
 
 record Client
@@ -27,6 +28,7 @@ end
 record Server
   client
   grant
+  endpoint
 end
 
 # Stand-in for BASE64URL(SHA256(ASCII(verifier))): the server stores the
@@ -37,11 +39,13 @@ def derive(verifier)
 end
 
 def new_server(client_id, redirect_uri)
-  Server.new(client: Client.new(client_id: client_id, redirect_uri: redirect_uri), grant: Grant.new(code: "", redirect_uri: "", challenge: "", used: false))
+  client = Client.new(client_id: client_id, redirect_uri: redirect_uri)
+  grant = Grant.new(code: "", redirect_uri: "", challenge: "", used: false)
+  Server.new(client: client, grant: grant, endpoint: new_endpoint())
 end
 
 def with_grant(server, grant)
-  Server.new(client: server.client, grant: grant)
+  Server.new(client: server.client, grant: grant, endpoint: server.endpoint)
 end
 
 # Authorization endpoint: issue a code only when the client id and the
@@ -49,47 +53,24 @@ end
 def issue(server, client_id, redirect_uri, challenge)
   match server.client.client_id == client_id and server.client.redirect_uri == redirect_uri
   when true
-    Ok(with_grant(server, Grant.new(code: "ac-" + client_id, redirect_uri: redirect_uri, challenge: challenge, used: false)))
+    pending = Grant.new(code: "ac-" + client_id, redirect_uri: redirect_uri, challenge: challenge, used: false)
+    grant = store_grant(server.endpoint, pending)
+    Ok(with_grant(server, grant))
   when false
     Error("unregistered client or redirect uri")
   end
 end
 
-# Token endpoint: each check is its own small function because executable
-# YupYup has no ternary and its boolean operators do not short-circuit.
+# Token endpoint: endpoint-owned state makes successful redemption atomic,
+# so a caller holding a stale Server snapshot cannot replay its grant.
+# @spec OAUTH-RT-6
 def redeem(server, code, redirect_uri, verifier)
-  match code == server.grant.code
-  when false
-    Error("unknown code")
-  when true
-    check_used(server, redirect_uri, verifier)
-  end
-end
-
-def check_used(server, redirect_uri, verifier)
-  match server.grant.used
-  when true
-    Error("code already redeemed")
-  when false
-    check_redirect(server, redirect_uri, verifier)
-  end
-end
-
-def check_redirect(server, redirect_uri, verifier)
-  match redirect_uri == server.grant.redirect_uri
-  when false
-    Error("redirect uri mismatch")
-  when true
-    check_verifier(server, verifier)
-  end
-end
-
-def check_verifier(server, verifier)
-  match derive(verifier) == server.grant.challenge
-  when false
-    Error("verifier mismatch")
-  when true
-    Redeemed(with_grant(server, Grant.new(code: server.grant.code, redirect_uri: server.grant.redirect_uri, challenge: server.grant.challenge, used: true)), "at-" + server.grant.code)
+  result = redeem_grant(server.endpoint, code, redirect_uri, derive(verifier))
+  match result
+  when Redeemed(grant, token)
+    Redeemed(with_grant(server, grant), token)
+  when Error(reason)
+    Error(reason)
   end
 end
 

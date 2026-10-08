@@ -28,11 +28,19 @@ defmodule Yup.Compiler.Erlang do
 
   alias Yup.SourceError
 
-  # Names whose binding is reserved by the language: `puts`, `map`, and
-  # `select` resolve directly to `Yup.Runtime` functions regardless of
+  # Names whose binding is reserved by the language: `puts`, `map`, `select`,
+  # and the OAuth example's endpoint-store operations resolve directly to
+  # `Yup.Runtime` functions regardless of
   # caller-scope state, so a local binding would otherwise be silently
   # shadowed by the dispatch clauses below.
-  @reserved_names MapSet.new(["puts", "map", "select"])
+  @reserved_names MapSet.new([
+                    "puts",
+                    "map",
+                    "select",
+                    "new_endpoint",
+                    "store_grant",
+                    "redeem_grant"
+                  ])
 
   def module_name(%Program{} = program) do
     key = program.source_path || :erlang.term_to_binary(program)
@@ -109,6 +117,13 @@ defmodule Yup.Compiler.Erlang do
       {"puts", [arg]} -> remote_call(line, :"Elixir.Yup.Runtime", :puts, [arg])
       {"map", [_, _]} -> remote_call(line, :"Elixir.Yup.Runtime", :map, call_args)
       {"select", [_, _]} -> remote_call(line, :"Elixir.Yup.Runtime", :select, call_args)
+      {"new_endpoint", []} -> remote_call(line, :"Elixir.Yup.Runtime", :new_endpoint, [])
+      {"store_grant", [endpoint, grant]} ->
+        remote_call(line, :"Elixir.Yup.Runtime", :store_grant, [endpoint, grant])
+
+      {"redeem_grant", [endpoint, code, redirect_uri, challenge]} ->
+        remote_call(line, :"Elixir.Yup.Runtime", :redeem_grant, [endpoint, code, redirect_uri, challenge])
+
       _ -> dispatch_call(name, call_args, line, function_names)
     end
   end

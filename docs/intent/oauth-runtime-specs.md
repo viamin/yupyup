@@ -22,9 +22,9 @@ Depends on #21.
   issued code, the exact redirect URI the code was issued for, and the
   verifier whose derived challenge equals the stored challenge, it shall
   return `Redeemed(server, token)` with a deterministic access token and
-  shall mark the code consumed in the returned server, so the caller
-  threading that server onwards holds a code that can no longer be
-  redeemed.
+  shall mark the code consumed in endpoint-owned state and in the returned
+  server. Any later redemption, including one supplied a stale pre-redemption
+  server snapshot, shall not mint another token for that code.
 - [x] **OAUTH-RT-4**: When the token endpoint function is called with a
   verifier whose derivation does not equal the stored challenge, it shall
   return `Error("verifier mismatch")` without consuming the grant — the
@@ -34,8 +34,9 @@ Depends on #21.
   return `Error("redirect uri mismatch")` without consuming the grant.
 - [x] **OAUTH-RT-6**: When the token endpoint function is called with a
   code that was never issued or with a code already consumed by an earlier
-  successful redemption, it shall return `Error(reason)` and shall not mint
-  another token for that code.
+  successful redemption — including when the caller supplies a stale server
+  snapshot — it shall return `Error(reason)` and shall not mint another token
+  for that code.
 - [x] **OAUTH-RT-7**: When `yup run examples/oauth_runtime.yup` executes,
   it shall exit 0 and print a transcript that shows, in order: the refused
   authorization request with an unregistered redirect URI, the issued code

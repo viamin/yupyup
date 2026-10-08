@@ -19,28 +19,25 @@ doubles as the protocol story.
 
 - **Written in YupYup, run through the existing CLI.** The issue asks for
   an *example runtime*, and the repo's runtime surface is `yup run`. No
-  new Elixir modules: the slice exercises the existing
+  standalone application endpoint or controller: the slice exercises the existing
   parse → compile → BEAM pipeline (`Yup.run_file/1`) and stays a
-  self-contained example, so the "implementation graph" entry point is the
-  example file itself plus the tests that drive its compiled functions.
-- **In-memory storage as threaded immutable records.** A `Server` record
-  holds the registered `Client` and one `Grant` slot. `issue/4` and
-  `redeem/4` are pure functions returning the next server value (and, for
-  redemption, the token) rather than mutating state; the demo threads the
-  latest server binding forward. This is the smallest storage that still
-  shows single-use semantics: the replayed redemption is refused because
-  the caller redeems against the post-consumption server. A production
-  store would key many grants by code; that is a non-goal.
+  self-contained example, with a narrow `Yup.Runtime` store primitive for
+  endpoint-owned grants. The implementation graph entry point is the example
+  file plus the tests that drive its compiled functions.
+- **Endpoint-owned in-memory storage.** A `Server` record reflects the
+  registered `Client` and one `Grant` slot, while `Yup.Runtime` owns the
+  actual grant state under a unique endpoint id. The store atomically marks
+  a code consumed, so a caller cannot redeem it again by retaining a stale
+  pre-redemption record. A production store would key many grants by code;
+  that is a non-goal.
 - **Exact redirect URI matching, both endpoints.** `issue/4` matches
   client id **and** redirect URI against the registration
   (OAUTH-RT-2, RFC 6749 simple-string comparison); `redeem/4` requires the
   redemption redirect URI to equal the URI the code was issued for, so a
   code minted for one redirect cannot be redeemed at another.
-- **Single-use codes via a `used` flag.** `redeem/4` walks its checks as a
-  chain of small functions (`check_used → check_redirect →
-  check_verifier`) because executable YupYup has no ternary and its
-  `and`/`or` do not short-circuit; each function holds one `match`, which
-  lowers to a lazy Erlang `case`. A consumed code answers
+- **Single-use codes via endpoint-owned state.** `redeem/4` delegates the
+  atomic lookup-and-consume operation to the endpoint store and reflects the
+  consumed `used` flag in its returned server. A consumed code answers
   `"code already redeemed"` (OAUTH-RT-6); a code that was never issued
   answers `"unknown code"`.
 - **PKCE with an abstract derivation.** `derive/1` (`"s256:" + verifier`)
@@ -64,8 +61,8 @@ doubles as the protocol story.
 (`redemptions <= 1`) and `examples/pkce_exchange.yup` proves the
 verifier-matching rule over finite state spaces, cross-checked by TLC in
 #21. This slice is the executable counterpart: the same two rules as
-running code — the `used` flag plays `redemptions <= 1`, and the
-`derive(verifier) == challenge` check plays
+running code — the endpoint store's consumed grant plays `redemptions <= 1`,
+and the `derive(verifier) == challenge` check plays
 `verifier == :matching`. The models remain the checked artifacts; the
 example makes the rules runnable and inspectable, and is the anchor the
 tests below pin to. Neither proves the other — that relationship is
@@ -85,8 +82,9 @@ listened to by anything.
 exported functions directly: issue-refusal for unregistered redirect URIs
 (OAUTH-RT-2), the happy path with token and consumed code (OAUTH-RT-3),
 verifier mismatch without consumption (OAUTH-RT-4), redirect mismatch
-(OAUTH-RT-5), code reuse and unknown codes (OAUTH-RT-6), and that the
-stored challenge is the derived, not raw, verifier. `test/cli_test.exs`
+(OAUTH-RT-5), stale-snapshot and concurrent code reuse plus unknown codes
+(OAUTH-RT-6), and that the stored challenge is the derived, not raw,
+verifier. `test/cli_test.exs`
 runs the example through the built escript and asserts the full
 transcript (OAUTH-RT-7).
 
@@ -94,8 +92,7 @@ transcript (OAUTH-RT-7).
 
 ```text
 examples/oauth_runtime.yup  new_server/2, derive/1, issue/4, redeem/4,
-                            check_used/3, check_redirect/3,
-                            check_verifier/2, show/1, show_exchange/1,
+                            show/1, show_exchange/1,
                             unwrap_ok/2, redeemed_server/2, run/0 demo
 test/oauth_runtime_test.exs drives the compiled module's functions
 test/cli_test.exs          runs the example through the built escript

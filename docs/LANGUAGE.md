@@ -316,6 +316,12 @@ which is not implemented) is not specially recognized, so it falls through
 to ordinary call dispatch and fails to compile as an unbound reference,
 consistent with calling any other undefined name.
 
+`new_endpoint`, `store_grant`, and `redeem_grant` are reserved internal
+runtime operations used only by the OAuth runtime example. They are not a
+general persistence API: the endpoint store assigns opaque ids, stores a
+grant, and atomically consumes a grant respectively. They remain deliberately
+small until YupYup gains a user-facing state or actor model.
+
 List literals do not yet support indexing, pattern matching inside `match`,
 or a Set type; a Set is left for a later issue. See [Current
 Limitations](#current-limitations) for what else is out of scope.
@@ -619,23 +625,20 @@ ordinary `yup run` path.
 ```
 
 The slice has one issuer with one registered client and one in-memory grant
-slot, held as immutable records threaded through pure endpoint functions
-rather than mutated state. The authorization endpoint (`issue`) issues a
-code only when the client id and redirect URI exactly match the
-registration; the token endpoint (`redeem`) hands out a token only when the
-code is the one issued, not yet consumed, redeemed at the same redirect URI
-it was issued for, and the verifier's derived challenge matches the stored
-challenge. Because executable YupYup has no ternary and its boolean
-operators do not short-circuit, `redeem` walks its checks as a chain of
-small functions, each holding one `match` — which lowers to a lazy Erlang
-`case`.
+slot. Immutable server records reflect the grant, but `Yup.Runtime` owns the
+endpoint state and atomically consumes it, so a stale pre-redemption record
+cannot replay a code. The authorization endpoint (`issue`) issues a code
+only when the client id and redirect URI exactly match the registration; the
+token endpoint (`redeem`) hands out a token only when the code is the one
+issued, not yet consumed, redeemed at the same redirect URI it was issued
+for, and the verifier's derived challenge matches the stored challenge.
 
 The two protocol rules the verified models prove appear here as running
-code: the grant's `used` flag plays `redemptions <= 1` from
-`examples/auth_code.yup`, and the `derive(verifier) == challenge` check
-plays `verifier == :matching` from `examples/pkce_exchange.yup`. The models
-remain the checked artifacts; the example makes the rules runnable. Neither
-proves the other.
+code: the endpoint store's consumed grant plays `redemptions <= 1` from
+`examples/auth_code.yup`, and the `derive(verifier) == challenge` check plays
+`verifier == :matching` from `examples/pkce_exchange.yup`. The models remain
+the checked artifacts; the example makes the rules runnable. Neither proves
+the other.
 
 This is a **toy subset** of OAuth, not a server. Its non-goals, deliberate
 and permanent for this example:

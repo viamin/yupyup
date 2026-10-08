@@ -18,7 +18,11 @@ defmodule Yup.OAuthRuntimeTest do
     {:ok, program} = Yup.Parser.parse(source, path: @example_path)
     {:ok, module} = Yup.Compiler.compile(program)
 
-    %{mod: module, server: module.new_server(@client_id, @redirect_uri)}
+    %{mod: module}
+  end
+
+  setup %{mod: mod} do
+    %{server: mod.new_server(@client_id, @redirect_uri)}
   end
 
   defp authorize(mod, server) do
@@ -121,6 +125,34 @@ defmodule Yup.OAuthRuntimeTest do
 
       assert {:Error, reason} = mod.redeem(after_redeem, code, @redirect_uri, @verifier)
       assert reason =~ "already redeemed"
+    end
+
+    # @spec OAUTH-RT-6
+    test "refuses a replay through a stale server snapshot", %{mod: mod, server: server} do
+      granted = authorize(mod, server)
+      code = granted.grant.code
+
+      assert {:Redeemed, _after_redeem, _token} =
+               mod.redeem(granted, code, @redirect_uri, @verifier)
+
+      assert {:Error, "code already redeemed"} =
+               mod.redeem(granted, code, @redirect_uri, @verifier)
+    end
+
+    # @spec OAUTH-RT-6
+    test "serializes simultaneous redemptions of the same grant", %{mod: mod, server: server} do
+      granted = authorize(mod, server)
+      code = granted.grant.code
+
+      results =
+        [
+          Task.async(fn -> mod.redeem(granted, code, @redirect_uri, @verifier) end),
+          Task.async(fn -> mod.redeem(granted, code, @redirect_uri, @verifier) end)
+        ]
+        |> Enum.map(&Task.await/1)
+
+      assert Enum.count(results, &match?({:Redeemed, _, _}, &1)) == 1
+      assert Enum.count(results, &match?({:Error, "code already redeemed"}, &1)) == 1
     end
 
     # @spec OAUTH-RT-6
