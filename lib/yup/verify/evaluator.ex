@@ -81,11 +81,11 @@ defmodule Yup.Verify.Evaluator do
 
   defp read_field(name, node, env) do
     cond do
-      env.mode == :initializer ->
-        raise source_error(env.path, node.loc, "state initializers cannot read state fields (#{name})")
-
       not MapSet.member?(env.fields, name) ->
         raise source_error(env.path, node.loc, "unknown state field #{name}")
+
+      env.mode == :initializer ->
+        raise source_error(env.path, node.loc, "state initializers cannot read state fields (#{name})")
 
       true ->
         Map.fetch!(env.state, name)

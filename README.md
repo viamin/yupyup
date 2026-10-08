@@ -34,7 +34,13 @@ This creates an executable named `yup` in the project root.
 ./yup run examples/records.yup
 ./yup run examples/dot_calls.yup
 ./yup run examples/collections.yup
+./yup verify examples/light.yup
+./yup verify --max-states 100 examples/counter.yup
 ```
+
+`yup verify` explores the reachable states of the file's single `model` block.
+Use `--max-states N` to set its exploration cap; an incomplete exploration
+exits nonzero and reports the counts reached.
 
 Expected output:
 

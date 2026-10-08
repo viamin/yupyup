@@ -35,15 +35,15 @@ defmodule Yup.Verify.Result do
   end
 
   # @spec VERIFY-4
-  def trace(parents, canonical)
+  def trace(parents, canonical), do: trace_back(parents, canonical, [])
 
-  def trace(_parents, nil), do: []
+  defp trace_back(_parents, nil, acc), do: acc
 
-  def trace(parents, canonical) do
+  defp trace_back(parents, canonical, acc) do
     case Map.fetch(parents, canonical) do
-      {:ok, {nil, _name}} -> []
-      {:ok, {parent, name}} -> trace(parents, parent) ++ [name]
-      :error -> []
+      {:ok, {nil, _name}} -> acc
+      {:ok, {parent, name}} -> trace_back(parents, parent, [name | acc])
+      :error -> acc
     end
   end
 

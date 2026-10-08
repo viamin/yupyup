@@ -105,11 +105,10 @@ defmodule Yup.Verify.Explorer do
 
   defp add_successor(queue, search, current, name, next) do
     canonical = Result.canonical_form(next)
-    search = %{search | edges: search.edges + 1}
 
     cond do
       MapSet.member?(search.visited, canonical) ->
-        {:ok, {queue, search}}
+        {:ok, {queue, %{search | edges: search.edges + 1}}}
 
       MapSet.size(search.visited) >= search.max_states ->
         {:incomplete, search}
@@ -117,7 +116,8 @@ defmodule Yup.Verify.Explorer do
       true ->
         search = %{
           search
-          | queue: :queue.in(canonical, queue),
+          | edges: search.edges + 1,
+            queue: :queue.in(canonical, queue),
             visited: MapSet.put(search.visited, canonical),
             parents: Map.put(search.parents, canonical, {current, name}),
             order: [canonical | search.order]

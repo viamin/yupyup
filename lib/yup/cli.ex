@@ -55,8 +55,8 @@ defmodule Yup.CLI do
   defp option_errors(invalid) do
     invalid
     |> Enum.map(fn
-      {flag, nil, nil} -> "unknown option --#{flag}"
-      {flag, nil, value} -> "invalid value for --#{flag}: #{value}"
+      {flag, nil} -> "unknown option #{flag}"
+      {flag, value} -> "invalid value for #{flag}: #{value}"
     end)
     |> Enum.join("\n")
   end

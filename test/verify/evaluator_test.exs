@@ -8,7 +8,14 @@ defmodule Yup.Verify.EvaluatorTest do
   alias Yup.Verify.Evaluator
 
   defp initializer_expr(source) do
-    {:ok, program} = Parser.parse(source, path: "model.yup")
+    declaration =
+      if String.starts_with?(source, "state ") do
+        source
+      else
+        "state value = " <> source
+      end
+
+    {:ok, program} = Parser.parse("model M\n  #{declaration}\nend", path: "model.yup")
     [model] = program.models
     [state] = model.states
     state.value
@@ -20,7 +27,16 @@ defmodule Yup.Verify.EvaluatorTest do
   end
 
   defp transition_expr(source) do
-    {:ok, program} = Parser.parse(source, path: "model.yup")
+    wrapped = """
+    model M
+      state b = 0
+      transition go do
+        #{source}
+      end
+    end
+    """
+
+    {:ok, program} = Parser.parse(wrapped, path: "model.yup")
     [model] = program.models
     [transition] = model.transitions
     [update] = transition.body
@@ -196,6 +212,16 @@ defmodule Yup.Verify.EvaluatorTest do
     env = Evaluator.env("model.yup", [:a, :b], %{}, :initializer)
 
     assert_raise SourceError, ~r/state initializers cannot read state fields \(a\)/, fn ->
+      Evaluator.eval(expr, env)
+    end
+  end
+
+  # @spec VERIFY-3
+  test "reports unknown names in state initializers as unknown fields" do
+    expr = initializer_expr("state b = count_typo + 1")
+    env = Evaluator.env("model.yup", [:count, :b], %{}, :initializer)
+
+    assert_raise SourceError, ~r/unknown state field count_typo/, fn ->
       Evaluator.eval(expr, env)
     end
   end

@@ -85,14 +85,14 @@ defmodule Yup.Verify.ExplorerTest do
       state b = 0
 
       transition bump do
-        state.a = a + 1
-        state.b = a + 1
+        state.a = a == 1 ? 0 : a + 1
+        state.b = a == 0 ? 1 : 0
       end
     end
     """
 
-    # From {0, 0}: bump -> {1, 1}; from {1, 1}: bump -> {2, 2}. Distinct
-    # canonical states regardless of map iteration order.
+    # From {0, 0}: bump -> {1, 0}; then -> {0, 1}; then -> {1, 0}. The final
+    # transition deduplicates a previously visited canonical state.
     assert {:ok, result} = explore(source)
     assert result.states == 3
     assert result.transitions == 3
@@ -108,6 +108,17 @@ defmodule Yup.Verify.ExplorerTest do
     assert {:ok, ["advance"]} = Result.trace_to(result, %{color: :green})
     assert {:ok, ["advance", "advance"]} = Result.trace_to(result, %{color: :yellow})
     assert {:error, :unknown_state} = Result.trace_to(result, %{color: :purple})
+  end
+
+  # @spec VERIFY-4
+  test "orders traces from the initial state through distinct transitions" do
+    parents = %{
+      [state: :initial] => {nil, nil},
+      [state: :middle] => {[state: :initial], "first"},
+      [state: :final] => {[state: :middle], "second"}
+    }
+
+    assert Result.trace(parents, [state: :final]) == ["first", "second"]
   end
 
   # @spec VERIFY-4
