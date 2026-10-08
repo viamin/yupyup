@@ -121,8 +121,8 @@ defmodule Yup.Compiler.Erlang do
       {"store_grant", [endpoint, grant]} ->
         remote_call(line, :"Elixir.Yup.Runtime", :store_grant, [endpoint, grant])
 
-      {"redeem_grant", [endpoint, code, redirect_uri, challenge]} ->
-        remote_call(line, :"Elixir.Yup.Runtime", :redeem_grant, [endpoint, code, redirect_uri, challenge])
+      {"redeem_grant", [_, _, _, _]} ->
+        remote_call(line, :"Elixir.Yup.Runtime", :redeem_grant, call_args)
 
       _ -> dispatch_call(name, call_args, line, function_names)
     end

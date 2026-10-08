@@ -91,7 +91,10 @@ defmodule Yup.OAuthRuntimeTest do
     end
 
     # @spec OAUTH-RT-4
-    test "refuses a mismatched verifier without consuming the code", %{mod: mod, server: server} do
+    test "refuses a mismatched verifier without consuming the code", %{
+      mod: mod,
+      server: server
+    } do
       granted = authorize(mod, server)
       code = granted.grant.code
 
