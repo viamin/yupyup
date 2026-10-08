@@ -671,7 +671,7 @@ The event mapping, stated once:
 | issue → Ok                                   | `issue`, issued    | — (stutter)                   |
 | issue → Error                                | — (stutter)        | — (stutter)                   |
 | redeem, matching verifier, Redeemed          | `redeem`, +1       | `submit_valid_verifier`, token |
-| redeem, matching verifier, refused (reuse)   | `redeem` (guard)   | — (stutter)                   |
+| redeem, any verifier, refused (reuse)        | `redeem` (guard)   | — (stutter)                   |
 | redeem, matching verifier, refused (other)   | — (stutter)        | — (stutter)                   |
 | redeem, wrong verifier, Redeemed             | `redeem`, +1       | `submit_invalid_verifier`, token |
 | redeem, wrong verifier, refused              | — (stutter)        | `submit_invalid_verifier`, no token |
@@ -680,15 +680,18 @@ The event mapping, stated once:
 
 Three rules govern it. Mapped **transitions are chosen from the event's
 inputs** — which code was submitted, whether the verifier derives to the
-stored challenge — never from the outcome, so a runtime that succeeds on
-inputs the model rejects still maps to the model's refusal transition
-and disagrees by construction. **Claims are chosen from the outcome**: a
-minted token claims `token_issued`, a consumed code claims a redemption,
-whatever the runtime's internals did. And **refusals may do less than
-the model permits**: a refused exchange maps to the model's own refusal
-encoding — `submit_invalid_verifier`, or `AuthCode.redeem`'s guard for
-a reused code — or stutters; conformance only fails when the runtime
-does what the model forbids.
+stored challenge — except a terminal reuse refusal (which the store
+detects before the verifier, so it takes priority over input
+classification and maps to `AuthCode.redeem`'s guard), and never from
+the outcome, so a runtime that succeeds on inputs the model rejects
+still maps to the model's refusal transition and disagrees by
+construction. **Claims are chosen from the outcome**: a minted token
+claims `token_issued`, a consumed code claims a redemption, whatever
+the runtime's internals did. And **refusals may do less than the model
+permits**: a refused exchange maps to the model's own refusal encoding
+— `submit_invalid_verifier`, or `AuthCode.redeem`'s guard for a reused
+code — or stutters; conformance only fails when the runtime does what
+the model forbids.
 
 Each mapped event is checked by stepping the models through
 `Yup.Verify.Semantics` — the same code `yup verify` uses to apply
