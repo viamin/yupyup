@@ -64,6 +64,19 @@ defmodule Yup.CLITest do
     assert output =~ "true"
   end
 
+  # @spec OAUTH-RT-7
+  test "runs oauth_runtime example through built escript", %{yup: yup} do
+    assert {output, 0} =
+             System.cmd(yup, ["run", "examples/oauth_runtime.yup"], stderr_to_stdout: true)
+
+    assert output =~ "authorize unregistered redirect: refused: unregistered client"
+    assert output =~ "authorize registered redirect: issued code ac-toy-client"
+    assert output =~ "redeem wrong verifier: refused: verifier mismatch"
+    assert output =~ "redeem redirect mismatch: refused: redirect uri mismatch"
+    assert output =~ "redeem correct verifier: token at-ac-toy-client"
+    assert output =~ "redeem the same code again: refused: code already redeemed"
+  end
+
   @tag :tmp_dir
   test "reports dot calls in model expressions as a source-located error", %{
     tmp_dir: tmp_dir,

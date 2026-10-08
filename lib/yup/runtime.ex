@@ -30,6 +30,83 @@ defmodule Yup.Runtime do
   def map(list, fun) when is_list(list), do: Enum.map(list, fun)
   def select(list, fun) when is_list(list), do: Enum.filter(list, fun)
 
+  defmodule Store do
+    @moduledoc false
+
+    use GenServer
+
+    def new_endpoint, do: GenServer.call(server(), :new_endpoint)
+
+    def store_grant(endpoint, grant) do
+      GenServer.call(server(), {:store_grant, endpoint, grant})
+    end
+
+    def redeem_grant(endpoint, code, redirect_uri, challenge) do
+      GenServer.call(server(), {:redeem_grant, endpoint, code, redirect_uri, challenge})
+    end
+
+    @impl GenServer
+    def init(_), do: {:ok, %{next_endpoint: 1, grants: %{}}}
+
+    @impl GenServer
+    def handle_call(:new_endpoint, _from, %{next_endpoint: endpoint} = state) do
+      {:reply, endpoint, %{state | next_endpoint: endpoint + 1}}
+    end
+
+    def handle_call({:store_grant, endpoint, %{code: code} = grant}, _from, state) do
+      {:reply, grant, put_in(state, [:grants, {endpoint, code}], grant)}
+    end
+
+    def handle_call({:redeem_grant, endpoint, code, redirect_uri, challenge}, _from, state) do
+      {result, grants} = redeem(state.grants, endpoint, code, redirect_uri, challenge)
+      {:reply, result, %{state | grants: grants}}
+    end
+
+    defp server do
+      case Process.whereis(__MODULE__) do
+        nil -> start_server()
+        pid -> pid
+      end
+    end
+
+    defp start_server do
+      case GenServer.start(__MODULE__, nil, name: __MODULE__) do
+        {:ok, pid} -> pid
+        {:error, {:already_started, pid}} -> pid
+      end
+    end
+
+    defp redeem(grants, endpoint, code, redirect_uri, challenge) do
+      case Map.fetch(grants, {endpoint, code}) do
+        :error ->
+          {{:Error, "unknown code"}, grants}
+
+        {:ok, %{used: true}} ->
+          {{:Error, "code already redeemed"}, grants}
+
+        {:ok, %{redirect_uri: ^redirect_uri, challenge: ^challenge} = grant} ->
+          redeemed = %{grant | used: true}
+          {{:Redeemed, redeemed, "at-" <> code}, Map.put(grants, {endpoint, code}, redeemed)}
+
+        {:ok, %{redirect_uri: redirect}} when redirect != redirect_uri ->
+          {{:Error, "redirect uri mismatch"}, grants}
+
+        {:ok, _grant} ->
+          {{:Error, "verifier mismatch"}, grants}
+      end
+    end
+  end
+
+  # OAuth's code-consumption rule cannot rely on the caller replacing an
+  # immutable Server record. The store serializes requests, so a retained
+  # snapshot, or two concurrent callers, cannot redeem a code more than once.
+  def new_endpoint, do: Store.new_endpoint()
+
+  def store_grant(endpoint, grant), do: Store.store_grant(endpoint, grant)
+
+  def redeem_grant(endpoint, code, redirect_uri, challenge),
+    do: Store.redeem_grant(endpoint, code, redirect_uri, challenge)
+
   # Lists and maps print as `[1, 2, 3]` / `{name: "Ada"}` rather than going
   # through IO.puts's charlist/Chars heuristics directly, since a YupYup list
   # of integers is otherwise indistinguishable from an Erlang charlist. Map

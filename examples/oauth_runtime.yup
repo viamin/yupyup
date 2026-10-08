@@ -1,0 +1,133 @@
+# OAuth authorization-code + PKCE, as a tiny executable runtime slice.
+#
+# This is the runnable counterpart to the verified finite models in
+# examples/auth_code.yup (codes are single-use) and examples/pkce_exchange.yup
+# (tokens require a matching verifier): one issuer, one registered client,
+# exact redirect URI matching at both endpoints, single-use authorization
+# codes, and a PKCE verifier check at the token endpoint.
+#
+# It is a toy, not a server: storage is one in-memory grant slot owned by
+# the endpoint (and reflected in immutable server records), codes and tokens
+# are deterministic because the toy has no randomness. `derive(verifier)`
+# below stands in for BASE64URL(SHA256(verifier)) exactly as the model
+# abstracts the hash.
+# No HTTP, no expiry, no refresh tokens, no ID tokens, no secrets.
+
+record Client
+  client_id
+  redirect_uri
+end
+
+record Grant
+  code
+  redirect_uri
+  challenge
+  used
+end
+
+record Server
+  client
+  grant
+  endpoint
+end
+
+# Stand-in for BASE64URL(SHA256(ASCII(verifier))): the server stores the
+# challenge transformed, never the raw verifier, and derives it again from
+# the submitted verifier at redemption time.
+def derive(verifier)
+  "s256:" + verifier
+end
+
+def new_server(client_id, redirect_uri)
+  client = Client.new(client_id: client_id, redirect_uri: redirect_uri)
+  grant = Grant.new(code: "", redirect_uri: "", challenge: "", used: false)
+  Server.new(client: client, grant: grant, endpoint: new_endpoint())
+end
+
+def with_grant(server, grant)
+  Server.new(client: server.client, grant: grant, endpoint: server.endpoint)
+end
+
+# Authorization endpoint: issue a code only when the client id and the
+# redirect URI exactly match the single registration.
+def issue(server, client_id, redirect_uri, challenge)
+  match server.client.client_id == client_id and server.client.redirect_uri == redirect_uri
+  when true
+    pending = Grant.new(code: "ac-" + client_id, redirect_uri: redirect_uri, challenge: challenge, used: false)
+    grant = store_grant(server.endpoint, pending)
+    Ok(with_grant(server, grant))
+  when false
+    Error("unregistered client or redirect uri")
+  end
+end
+
+# Token endpoint: endpoint-owned state makes successful redemption atomic,
+# so a caller holding a stale Server snapshot cannot replay its grant.
+# @spec OAUTH-RT-6
+def redeem(server, code, redirect_uri, verifier)
+  result = redeem_grant(server.endpoint, code, redirect_uri, derive(verifier))
+  match result
+  when Redeemed(grant, token)
+    Redeemed(with_grant(server, grant), token)
+  when Error(reason)
+    Error(reason)
+  end
+end
+
+# Transcript helpers: render an endpoint outcome, or extract the server to
+# thread forward (falling back to the previous server, which no demo step
+# ever takes because the failing branches below are the refused ones).
+def show(result)
+  match result
+  when Ok(issued)
+    "issued code " + issued.grant.code
+  when Error(reason)
+    "refused: " + reason
+  end
+end
+
+def show_exchange(result)
+  match result
+  when Redeemed(exchanged, token)
+    "token " + token
+  when Error(reason)
+    "refused: " + reason
+  end
+end
+
+def unwrap_ok(result, fallback)
+  match result
+  when Ok(value)
+    value
+  when Error(reason)
+    fallback
+  end
+end
+
+def redeemed_server(result, fallback)
+  match result
+  when Redeemed(exchanged, token)
+    exchanged
+  when Error(reason)
+    fallback
+  end
+end
+
+# The demo transcript: happy path plus every refusal, in protocol order.
+verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+server = new_server("toy-client", "https://app.example/cb")
+
+puts "authorize unregistered redirect: " + show(issue(server, "toy-client", "https://evil.example/cb", derive(verifier)))
+
+authorized = issue(server, "toy-client", "https://app.example/cb", derive(verifier))
+puts "authorize registered redirect: " + show(authorized)
+granted = unwrap_ok(authorized, server)
+
+puts "redeem wrong verifier: " + show_exchange(redeem(granted, granted.grant.code, "https://app.example/cb", "plain-wrong-verifier"))
+puts "redeem redirect mismatch: " + show_exchange(redeem(granted, granted.grant.code, "https://evil.example/cb", verifier))
+
+exchanged = redeem(granted, granted.grant.code, "https://app.example/cb", verifier)
+puts "redeem correct verifier: " + show_exchange(exchanged)
+
+after_redeem = redeemed_server(exchanged, granted)
+puts "redeem the same code again: " + show_exchange(redeem(after_redeem, after_redeem.grant.code, "https://app.example/cb", verifier))
