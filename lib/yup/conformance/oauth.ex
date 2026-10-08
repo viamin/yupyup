@@ -430,7 +430,9 @@ defmodule Yup.Conformance.OAuth do
   # reports the nearest *enclosing* repository: only a checkout that is
   # itself a repo's top level pins that repo's commit (OAUTH-CF-5).
   defp git_commit(dir) do
-    case System.cmd("git", ["-C", dir, "rev-parse", "--show-toplevel", "HEAD"], stderr_to_stdout: true) do
+    case System.cmd("git", ["-C", dir, "rev-parse", "--show-toplevel", "HEAD"],
+           stderr_to_stdout: true
+         ) do
       {output, 0} ->
         [top, commit] = output |> String.trim() |> String.split("\n")
         if top == Path.absname(dir), do: commit, else: nil
