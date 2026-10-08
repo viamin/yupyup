@@ -79,6 +79,17 @@ stdout for cross-checking with an external TLA+/TLC installation; save it as
 [External Cross-Checking With TLA+](docs/LANGUAGE.md#external-cross-checking-with-tla)
 in the language docs for the supported subset and how to run TLC.
 
+`bin/tlc-crosscheck` automates that cross-check: it verifies each model,
+exports it, runs TLC on the exported module, and exits nonzero with a
+`DISAGREEMENT` line whenever the two checkers' pass/fail verdicts differ.
+TLC is optional — without an installation (no `YUP_TLC`, and no `java`
+with `tla2tools.jar` on `CLASSPATH`) the script and the test suite skip
+cleanly:
+
+```sh
+YUP_TLC='java -cp /opt/tla2tools.jar tlc2.TLC' bin/tlc-crosscheck
+```
+
 Expected output:
 
 ```text
@@ -90,6 +101,10 @@ Hello, world
 ```sh
 mix test
 ```
+
+The TLC cross-check test runs only when a TLC installation is available
+(`YUP_TLC`, or `java` with `tla2tools.jar` on `CLASSPATH`); otherwise it
+is excluded, so the suite passes without a TLA+ install.
 
 ## Example
 

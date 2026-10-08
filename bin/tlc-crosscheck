@@ -1,0 +1,27 @@
+#!/bin/sh
+# Optional TLC cross-check for `yup verify` results (issue #21).
+#
+# Runs the YupYup verifier and an external TLC installation on the same
+# finite models and reports any disagreement between the two checkers
+# (exit 1 with a DISAGREEMENT line). TLC is optional: when no
+# installation is found the script prints a skip message and exits 0, so
+# CI and local test runs pass without a TLA+ install.
+#
+# Usage:
+#   bin/tlc-crosscheck [FILE...]   # defaults to the four example models
+#
+# TLC setup (either):
+#   export CLASSPATH=/path/to/tla2tools.jar   # with java on PATH
+#   export YUP_TLC='java -cp /path/to/tla2tools.jar tlc2.TLC'
+# See docs/LANGUAGE.md#external-cross-checking-with-tla for details.
+
+set -e
+
+cd "$(dirname "$0")/.."
+
+if ! command -v mix >/dev/null 2>&1; then
+  echo "Warning: mix tool not available, skipping TLC cross-check"
+  exit 0
+fi
+
+exec mix run --no-start -e 'Yup.Crosscheck.Tlc.main(System.argv())' -- "$@"
