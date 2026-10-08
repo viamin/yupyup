@@ -317,7 +317,7 @@ defmodule Yup.CLITest do
                )
 
       assert output =~ "MODULE AuthCode"
-      assert output =~ "EXTENDS Naturals"
+      assert output =~ "EXTENDS Integers"
       assert output =~ "VARIABLES issued, redemptions"
       assert output =~ "Init =="
       assert output =~ "Issue =="

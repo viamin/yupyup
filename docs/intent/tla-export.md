@@ -45,7 +45,11 @@ and re-check the declared invariants, independently of `yup verify`.
 - **Expression translation.** Supported: the verifier's model expression
   subset minus strings and `nil`. Integers, booleans, atoms, field reads
   (bare or `state.`), `+ - * /`, `== != < <= > >=` (`<=` becomes `=<`, `!=`
-  becomes `#`), `and or not`, and ternaries. Atoms become distinct TLA+
+  becomes `#`), `and or not`, and ternaries. The module extends `Integers`,
+  not `Naturals`: YupYup integers are unbounded signed values (subtraction
+  can reach negatives, and the truncating `/` translation below reads
+  negative dividends), and `Naturals` leaves `-`/`div`/`%`/ordering
+  unspecified for negative operands. Atoms become distinct TLA+
   strings (`:known` becomes `"known"`). `and`/`or`/`not` and ternary
   conditions must preserve YupYup truthiness (only `false` is falsy among
   exportable values), so operands that are not statically boolean —
@@ -71,12 +75,13 @@ and re-check the declared invariants, independently of `yup verify`.
   for a statement with no effect on the primed variables — ordering
   comparisons with a statically atom or boolean operand, duplicate field
   assignment in one transition, assignment to undeclared fields, unknown
-  field reads, initializer field reads, and names that cannot become TLA+
+  field reads, initializer field reads, names that cannot become TLA+
   identifiers (`?`/`!` are not identifier characters) or that collide with
   generated definitions (`vars`, `Init`, `Next`, `Spec`, action names, and
-  numbered invariants) all fail with source-located diagnostics and a
-  nonzero exit. A file must contain exactly one model block, mirroring
-  `yup verify`.
+  numbered invariants) or with `Nat`/`Int` imported by `EXTENDS Integers`,
+  and model names that are TLA+ reserved words (e.g. `TRUE`) all fail with
+  source-located diagnostics and a nonzero exit. A file must contain
+  exactly one model block, mirroring `yup verify`.
 
 ## Non-goals (from the issue)
 

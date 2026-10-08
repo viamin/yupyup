@@ -17,7 +17,9 @@ invariant specs whose results this export cross-checks.
   and read a field assigned earlier in the same body at its primed value,
   preserving YupYup's sequential update semantics.
 - [x] **TLA-3**: When an exported expression uses only supported syntax, the
-  translation shall be semantically equivalent TLA+: equality and
+  translation shall be semantically equivalent TLA+ over signed integers
+  (`EXTENDS Integers`, matching YupYup's unbounded signed values):
+  equality and
   comparisons map to TLA+ operators (`<=` to `=<`, `!=` to `#`), integer
   division `/` maps to a truncating expression over `div`/`%` that matches
   Elixir `div/2` (TLA+ `div` floors; the floored quotient is adjusted by one
@@ -30,9 +32,11 @@ invariant specs whose results this export cross-checks.
   (no assignment) in a transition body, an ordering comparison
   (`< <= > >=`) with an operand that is statically an atom or boolean,
   assigning the same field more than once in one transition, or names that
-  cannot map to TLA+ identifiers or that collide with generated definitions
-  — the export shall fail with a source-located diagnostic naming the
-  problem, and the command shall exit nonzero without emitting a module.
+  cannot map to TLA+ identifiers, that collide with generated or
+  `EXTENDS Integers`-imported definitions, or model names that are TLA+
+  reserved words — the export shall fail with a source-located diagnostic
+  naming the problem, and the command shall exit nonzero without emitting
+  a module.
 - [x] **TLA-5**: When the same model is exported more than once, the
   generated module text shall be byte-for-byte identical, with every line
   derived from declaration order rather than ambient state.
