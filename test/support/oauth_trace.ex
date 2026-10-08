@@ -16,7 +16,7 @@ defmodule Yup.OAuthTrace do
   issue -> Ok                              | `issue`, issued      | — (stutter)
   issue -> Error                           | — (stutter)          | — (stutter)
   redeem, matching verifier, Redeemed      | `redeem`, +1         | `submit_valid_verifier`, token
-  redeem, matching verifier, refused reuse | `redeem` (guard)     | — (stutter)
+  redeem, any verifier, refused reuse      | `redeem` (guard)     | — (stutter)
   redeem, matching verifier, refused other | — (stutter)          | — (stutter)
   redeem, wrong verifier, Redeemed         | `redeem`, +1         | `submit_invalid_verifier`, token
   redeem, wrong verifier, refused          | — (stutter)          | `submit_invalid_verifier`, no token
@@ -25,13 +25,15 @@ defmodule Yup.OAuthTrace do
 
   Three rules carry the load:
 
-  - **Transitions are chosen from the event's inputs, never its
-    outcome.** Which model transition fires depends on what the caller
-    submitted — whether the code is the one the grant slot holds and the
-    submitted verifier derives to the stored challenge — so a runtime
-    that *succeeds* on inputs the model rejects is still mapped to the
-    model's refusal transition and surfaces as a disagreement, instead of
-    being silently mapped to the success transition.
+  - **Transitions are chosen from the event's inputs, except a terminal
+    reuse refusal.** Which model transition fires normally depends on what
+    the caller submitted — whether the code is the one the grant slot holds
+    and the submitted verifier derives to the stored challenge — so a
+    runtime that *succeeds* on inputs the model rejects is still mapped to
+    the model's refusal transition and surfaces as a disagreement, instead
+    of being silently mapped to the success transition. The store checks
+    reuse before the verifier, however, and that outcome takes priority:
+    the caller's stale snapshot cannot otherwise preserve a prior token.
   - **Claims are chosen from the runtime's outcome.** A minted token
     claims `token_issued` and a consumed code claims a redemption,
     whether or not the runtime's internal state agrees — the abstraction
@@ -97,12 +99,14 @@ defmodule Yup.OAuthTrace do
   def redeem(server, code, verifier, result, derive)
 
   def redeem(server, code, verifier, result, derive) do
-    server
-    |> classified(code, verifier, derive)
+    result
+    |> classified(server, code, verifier, derive)
     |> exchange_event(result)
   end
 
-  defp classified(server, code, verifier, derive) do
+  defp classified({:Error, @reuse_reason}, _server, _code, _verifier, _derive), do: :reuse
+
+  defp classified(_result, server, code, verifier, derive) do
     grant = server.grant
 
     cond do
@@ -154,7 +158,7 @@ defmodule Yup.OAuthTrace do
   # The single-use rule as the model states it: AuthCode's `redeem`
   # guard no-ops a second redemption, so the step is invariant-preserving
   # and the runtime's refusal agrees with the unchanged redemptions.
-  defp exchange_event(:matching_verifier, {:Error, @reuse_reason}) do
+  defp exchange_event(:reuse, {:Error, @reuse_reason}) do
     %Event{
       label: "redeem: code already redeemed, refused",
       steps: [{@auth_code, "redeem"}],

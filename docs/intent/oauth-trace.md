@@ -52,14 +52,18 @@ the models forbid.
   `%Trace.Disagreement{}` (`:claim`, `:invariant`, `:unknown_model`,
   `:unknown_transition`, `:unknown_field`, `:evaluation`,
   `:duplicate_model`) and the session stays at its last conforming state.
-- **Transitions are chosen from inputs, never the outcome.** Which
-  mapped transition fires depends on what the caller submitted — is the
-  code the one the grant slot holds, does the submitted verifier derive
-  to the stored challenge — while the claims are derived from the
+- **Transitions are chosen from inputs, except terminal reuse.** Which
+  mapped transition fires normally depends on what the caller submitted —
+  is the code the one the grant slot holds, does the submitted verifier
+  derive to the stored challenge — while the claims are derived from the
   runtime's outcome. A runtime that mints a token on a wrong verifier is
   therefore mapped to `submit_invalid_verifier` *claiming*
-  `token_issued == true`: the disagreement is structural, not an
-  artifact of how the mapper read the result.
+  `token_issued == true`: the disagreement is structural, not an artifact
+  of how the mapper read the result. The store checks whether a code was
+  consumed before it checks the verifier, so a terminal reuse refusal
+  takes priority over input classification and maps to AuthCode's guarded
+  `redeem`; otherwise a wrong-verifier replay would erase the abstract
+  record of the prior issued token.
 - **Refusals map to the models' own refusal encodings, or stutter.**
   A wrong verifier maps to `PkceExchange.submit_invalid_verifier`
   (`token_issued` false — the model agrees no token may flow); a reuse

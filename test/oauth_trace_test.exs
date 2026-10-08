@@ -137,6 +137,25 @@ defmodule Yup.OAuthTraceTest do
     end
 
     # @spec OAUTH-TC-2
+    test "a reuse refusal takes precedence over a wrong verifier", %{mod: mod} do
+      granted = authorize(mod, mod.new_server(@client_id, @redirect_uri))
+      code = granted.grant.code
+      {:Redeemed, _, _} = mod.redeem(granted, code, @redirect_uri, @verifier)
+
+      {:Error, "code already redeemed"} =
+        result = mod.redeem(granted, code, @redirect_uri, "wrong")
+
+      assert mapped_redeem(mod, granted, code, "wrong", result) == %Event{
+               label: "redeem: code already redeemed, refused",
+               steps: [{"AuthCode", "redeem"}],
+               claims: [
+                 {"AuthCode", {:unchanged, :redemptions}},
+                 {"PkceExchange", {:unchanged, :token_issued}}
+               ]
+             }
+    end
+
+    # @spec OAUTH-TC-2
     test "a redirect-mismatch refusal stutters because redirects are unmodeled", %{mod: mod} do
       granted = authorize(mod, mod.new_server(@client_id, @redirect_uri))
       code = granted.grant.code
@@ -297,6 +316,32 @@ defmodule Yup.OAuthTraceTest do
 
       {:Redeemed, _, _} = exchanged = mod.redeem(granted, code, @redirect_uri, @verifier)
       conform!(session, mapped_redeem(mod, granted, code, @verifier, exchanged))
+    end
+
+    # @spec OAUTH-TC-2
+    test "a wrong-verifier replay preserves an already-issued token", %{
+      mod: mod,
+      session: session
+    } do
+      granted = authorize(mod, mod.new_server(@client_id, @redirect_uri))
+      session = conform!(session, Mapping.issue({:Ok, granted}))
+      code = granted.grant.code
+
+      {:Redeemed, _, _} = exchanged = mod.redeem(granted, code, @redirect_uri, @verifier)
+      session = conform!(session, mapped_redeem(mod, granted, code, @verifier, exchanged))
+
+      {:Error, "code already redeemed"} =
+        replay = mod.redeem(granted, code, @redirect_uri, "wrong")
+
+      session = conform!(session, mapped_redeem(mod, granted, code, "wrong", replay))
+
+      assert Trace.state(session, "AuthCode") == %{issued: true, redemptions: 1}
+
+      assert Trace.state(session, "PkceExchange") == %{
+               challenge: :known,
+               verifier: :matching,
+               token_issued: true
+             }
     end
   end
 

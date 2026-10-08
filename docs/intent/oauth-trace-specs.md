@@ -16,15 +16,16 @@ Depends on #22.
 - [x] **OAUTH-TC-2**: When the runtime refuses an exchange, the mapping
   shall produce invariant-preserving model behavior only — a wrong
   verifier maps to `PkceExchange.submit_invalid_verifier` with
-  `token_issued` false, a reuse refusal maps to `AuthCode.redeem` whose
-  guard leaves `redemptions` unchanged, and redirect mismatch, unknown
+  `token_issued` false, and a reuse refusal — regardless of submitted
+  verifier — maps to `AuthCode.redeem` whose guard leaves `redemptions`
+  unchanged. Redirect mismatch, unknown
   code, and unregistered issue map to stuttering steps with unchanged
   claims — and the session shall accept each such event.
 - [x] **OAUTH-TC-3**: When the runtime returns `Redeemed` for inputs the
   models reject — a verifier that does not derive to the stored
   challenge, or a code the grant never held — the mapping shall still
-  choose the mapped transitions from the inputs (never from the
-  outcome) and derive the claims from the outcome, so the event
+  choose the mapped transitions from the inputs (except that the terminal
+  reuse refusal takes priority) and derive the claims from the outcome, so the event
   disagrees with the model by construction.
 - [x] **OAUTH-TC-4**: When the good runtime's full transcript (refused
   unregistered issue, issued code, wrong-verifier refusal, redirect
