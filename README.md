@@ -40,6 +40,8 @@ This creates an executable named `yup` in the project root.
 ./yup verify examples/broken_invariant.yup
 ./yup verify examples/auth_code.yup
 ./yup verify examples/broken_auth_code.yup
+./yup verify examples/pkce_exchange.yup
+./yup verify examples/broken_pkce_exchange.yup
 ```
 
 `yup verify` explores the reachable states of the file's single `model` block
@@ -56,6 +58,18 @@ invariant `redemptions <= 1`. `examples/broken_auth_code.yup` is the same
 protocol without the single-use guard, so verification exits nonzero with the
 counterexample trace `issue, redeem, redeem` reaching the doubly-redeemed
 state `{issued: true, redemptions: 2}`.
+
+`examples/pkce_exchange.yup` models the PKCE token-exchange rule the same
+way: a token may be issued only when the submitted verifier matches the
+stored challenge, guarded by the invariant
+`not token_issued or verifier == :matching`. The challenge and verifier
+values stay abstract atoms (`:known`, `:unknown`, `:matching`, `:wrong`) and
+the cryptographic checking (deriving the challenge from the verifier) is
+deliberately abstracted out of this finite model: it proves the protocol
+rule, not the hash. `examples/broken_pkce_exchange.yup` is the same exchange
+with a server that issues the token on an invalid verifier, so verification
+exits nonzero with the counterexample trace `submit_invalid_verifier`
+reaching the state `{challenge: :known, token_issued: true, verifier: :wrong}`.
 
 Expected output:
 
