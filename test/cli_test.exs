@@ -229,7 +229,7 @@ defmodule Yup.CLITest do
                  stderr_to_stdout: true
                )
 
-      assert output =~ "examples/broken_auth_code.yup:4:1:"
+      assert output =~ "examples/broken_auth_code.yup:5:1:"
       assert output =~ ~s/invariant "authorization code is single-use" failed/
       assert output =~ "counterexample state {issued: true, redemptions: 2}"
       assert output =~ "reached via: issue, redeem, redeem"
