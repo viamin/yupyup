@@ -4,10 +4,11 @@ defmodule Yup.Verify do
 
   Parses the file, requires exactly one `model` block (executable code may
   coexist but is neither executed nor compiled), and runs the breadth-first
-  explorer. Returns `{:ok, result}` for an exploration that ran to completion
-  and `{:error, error}` for parse or evaluation errors and incomplete
-  searches; a completed exploration is a reachability result, not a property
-  verification claim.
+  explorer, checking any declared invariants at every explored state (issue
+  #10). Returns `{:ok, result}` for an exploration that ran to completion and
+  `{:error, error}` for parse or evaluation errors, incomplete searches, and
+  invariant violations; a completed exploration reports what held at the
+  explored states, never an unbounded proof claim.
   """
 
   alias Yup.AST.Program
@@ -38,9 +39,19 @@ defmodule Yup.Verify do
   end
 
   # @spec VERIFY-5
+  # @spec INVARIANT-4
   def format_result(%Result{} = result) do
     "model #{result.model_name}: exploration complete: " <>
-      format_counts(result.states, result.transitions) <> " explored"
+      format_counts(result.states, result.transitions) <>
+      " explored" <> held_invariants(result)
+  end
+
+  # The suffix is scoped to explored states so a completed search never
+  # implies unbounded proof (issue #10 constraint).
+  defp held_invariants(%Result{invariants: []}), do: ""
+
+  defp held_invariants(%Result{invariants: invariants}) do
+    "; " <> pluralize(length(invariants), "invariant") <> " held at every explored state"
   end
 
   # Shared between the complete and incomplete messages so state/transition

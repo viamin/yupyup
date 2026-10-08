@@ -382,7 +382,7 @@ intent available without a separate annotation sidecar.
 
 ## Current Limitations
 
-The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested blocks other than `def ... end`, `match ... end`, and `record ... end`, string interpolation, comments inside string literals, type-scoped methods, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors (including actor dot-call dispatch), full type checking, or verification constructs.
+The parser is line-oriented and intentionally tiny. Anonymous function bodies are limited to a single expression on the same line as the `{ |params| ... }` literal; there is no `do ... end` block form yet (see Proposed And Unresolved). The parser does not support nested blocks other than `def ... end`, `match ... end`, `record ... end`, model `transition ... end` and `invariant ... end`, string interpolation, comments inside string literals, type-scoped methods, mutable record updates, record patterns inside `match`, guards inside `when`, exhaustive matching warnings, actors (including actor dot-call dispatch), or full type checking.
 
 List and map literals (see [Immutable Collections](#immutable-collections)) are the only collection types today: there is no Set, no indexing into a list, no list or map pattern inside `match`, and no collection operations beyond `map` and `select`.
 
@@ -413,6 +413,8 @@ Model declarations:
   initial value. State initializers use model expressions.
 - `transition name do … end` defines a named transition. The body describes
   how state changes when the transition fires.
+- `invariant "name" do expr end` declares a named invariant checked at every
+  explored state (see [Model Invariants](#model-invariants)).
 
 Within a transition body, `state.name` reads the current value of a state
 field and `state.name = expr` sets its next value.
@@ -429,6 +431,70 @@ Models are intentionally non-executable. They parse into explicit AST nodes
 downstream analysis.
 
 Boolean operators are not short-circuiting in the BEAM backend yet. `true or (1 / 0)` evaluates both sides today.
+
+## Model Invariants
+
+Models can declare named invariants. An invariant is a model property checked
+by `yup verify` at every state it explores; it is never lowered to BEAM code
+and is not a production assertion.
+
+```yup
+model Light
+  state value = :off
+
+  invariant "value is on or off" do
+    value == :on or value == :off
+  end
+
+  transition toggle do
+    state.value = value == :off ? :on : :off
+  end
+end
+```
+
+Invariant declarations:
+
+- `invariant "name" do expr end` names the property with a non-empty string
+  label and a body of exactly one expression line, closed by its own `end`.
+  The label is reported verbatim when the invariant fails.
+- The condition uses the model expression subset (literals, state field reads
+  through bare names or `state.field`, unary/binary operators, and ternaries)
+  and is parsed into a `Yup.AST.Invariant` node with the header's source
+  location. Calls, dot calls, and other expression shapes are rejected with
+  source-located diagnostics, as in state initializers and transition bodies.
+- The condition holds at a state when it evaluates truthy under YupYup
+  truthiness: only `nil` and `false` fail an invariant.
+- Invariant names must be unique within a model; duplicates are rejected with
+  a source-located diagnostic before exploration begins.
+
+When an invariant fails at an explored state, `yup verify` exits nonzero and
+reports the invariant's name and source location together with a
+counterexample: the violating state and the transition trace from the initial
+state. Because exploration is breadth-first, the trace is a shortest one.
+
+```text
+examples/broken_invariant.yup:4:1: invariant "count stays below 3" failed
+  counterexample state {count: 3}
+  reached via: increment, increment, increment
+```
+
+When a completed search finds no violations, the held invariants are reported
+alongside the exploration counts:
+
+```text
+model Light: exploration complete: 2 states, 2 transitions explored; 1 invariant held at every explored state
+```
+
+These results are bounded by the finite state space `yup verify` explores: a
+completed search reports what held at every explored state and never claims
+unbounded proof, and a search cut off by `--max-states` reports
+incompleteness rather than any invariant outcome. An invariant condition that
+fails to evaluate (division by zero, an unknown field) aborts the search as
+an evaluation error carrying the state and trace where it happened.
+
+Passing and failing examples ship in `examples/invariants.yup` and
+`examples/broken_invariant.yup`. Temporal properties, fairness, refinement,
+and SMT-backed proof are out of scope.
 
 ## Proposed And Unresolved
 

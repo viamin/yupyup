@@ -3,9 +3,10 @@ defmodule Yup.AST.Model do
   A formal model declaration. Models are non-executable, abstract state-machine
   descriptions that coexist alongside executable code.
 
-  A model contains state field declarations and named transitions that describe
-  how state changes.
+  A model contains state field declarations, named transitions that describe
+  how state changes, and named invariants checked at every explored state by
+  `yup verify`.
   """
 
-  defstruct [:name, states: [], transitions: [], loc: nil]
+  defstruct [:name, states: [], transitions: [], invariants: [], loc: nil]
 end

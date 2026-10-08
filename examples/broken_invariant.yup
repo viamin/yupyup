@@ -1,0 +1,11 @@
+model Counter
+  state count = 0
+
+  invariant "count stays below 3" do
+    count < 3
+  end
+
+  transition increment do
+    state.count = count + 1
+  end
+end

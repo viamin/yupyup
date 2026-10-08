@@ -36,11 +36,17 @@ This creates an executable named `yup` in the project root.
 ./yup run examples/collections.yup
 ./yup verify examples/light.yup
 ./yup verify --max-states 100 examples/counter.yup
+./yup verify examples/invariants.yup
+./yup verify examples/broken_invariant.yup
 ```
 
-`yup verify` explores the reachable states of the file's single `model` block.
-Use `--max-states N` to set its exploration cap; an incomplete exploration
-exits nonzero and reports the counts reached.
+`yup verify` explores the reachable states of the file's single `model` block
+and checks any declared invariants at every explored state. Use
+`--max-states N` to set its exploration cap; an incomplete exploration exits
+nonzero and reports the counts reached. A failing invariant exits nonzero and
+prints its name, source location, the violating state, and a counterexample
+trace from the initial state; results only ever speak about explored states,
+never unbounded proof.
 
 Expected output:
 

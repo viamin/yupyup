@@ -139,6 +139,54 @@ defmodule Yup.VerifyTest do
     assert failure.diagnostic.message =~ "state initializers cannot read state fields (a)"
   end
 
+  # ── invariants ──────────────────────────────────────────────────────
+
+  # @spec INVARIANT-4
+  test "format_result reports held invariants without claiming proof" do
+    {:ok, result} = Verify.verify_file("examples/invariants.yup")
+
+    assert Verify.format_result(result) ==
+             "model Light: exploration complete: 2 states, 2 transitions explored; " <>
+               "1 invariant held at every explored state"
+
+    refute Verify.format_result(result) =~ ~r/prov|verif/i
+  end
+
+  # @spec INVARIANT-4
+  @tag :tmp_dir
+  test "format_result pluralizes multiple held invariants", %{tmp_dir: tmp_dir} do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "on or off" do
+        value == :on or value == :off
+      end
+
+      invariant "not purple" do
+        value != :purple
+      end
+    end
+    """
+
+    path = write_model(tmp_dir, "two_invariants.yup", source)
+
+    assert {:ok, result} = Verify.verify_file(path)
+    assert Verify.format_result(result) =~ "2 invariants held at every explored state"
+  end
+
+  # @spec INVARIANT-3
+  test "verify_file reports invariant violations with counterexamples" do
+    assert {:error, %Verify.Failure{kind: :invariant} = failure} =
+             Verify.verify_file("examples/broken_invariant.yup")
+
+    assert failure.invariant == "count stays below 3"
+    assert failure.state == %{count: 3}
+    assert failure.trace == ["increment", "increment", "increment"]
+    assert failure.diagnostic.line == 4
+    assert Verify.Failure.format(failure) =~ "counterexample state {count: 3}"
+  end
+
   # ── program-level API ───────────────────────────────────────────────
 
   # @spec VERIFY-1

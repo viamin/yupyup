@@ -19,6 +19,7 @@ defmodule Yup.ParserTest do
     Match,
     MatchClause,
     Model,
+    Invariant,
     Parameter,
     Program,
     Record,
@@ -910,7 +911,7 @@ defmodule Yup.ParserTest do
     """
 
     assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
-    assert error.message =~ "expected state or transition inside model"
+    assert error.message =~ "expected state, transition, or invariant inside model"
   end
 
   test "reports unexpected content inside transition body" do
@@ -955,6 +956,152 @@ defmodule Yup.ParserTest do
              Yup.Parser.parse(source, path: "model.yup")
 
     assert %Literal{kind: :atom, value: :"ok?!"} = state.value
+  end
+
+  # ── model invariants ────────────────────────────────────────────────
+
+  # @spec INVARIANT-1
+  test "parses invariant declarations into the model AST" do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "value is on or off" do
+        value == :on or value == :off
+      end
+
+      transition toggle do
+        state.value = value == :off ? :on : :off
+      end
+    end
+    """
+
+    assert {:ok, %Program{models: [model]}} = Yup.Parser.parse(source, path: "model.yup")
+
+    assert [invariant] = model.invariants
+    assert invariant.name == "value is on or off"
+    assert %BinaryOp{op: "or"} = invariant.condition
+    assert invariant.loc == %{line: 4, column: 1}
+  end
+
+  # @spec INVARIANT-1
+  test "parses multiple invariants in declaration order" do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "on or off" do
+        value == :on or value == :off
+      end
+
+      invariant "not purple" do
+        state.value != :purple
+      end
+    end
+    """
+
+    assert {:ok, %Program{models: [%Model{invariants: invariants}]}} =
+             Yup.Parser.parse(source, path: "model.yup")
+
+    assert Enum.map(invariants, & &1.name) == ["on or off", "not purple"]
+
+    assert [%BinaryOp{op: "or"}, %BinaryOp{op: "!=", left: %StateAccess{name: "value"}}] =
+             Enum.map(invariants, & &1.condition)
+  end
+
+  # @spec INVARIANT-1
+  test "reports missing end for invariant" do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "on or off" do
+        value == :on
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+    assert error.message =~ "missing end for invariant \"on or off\""
+  end
+
+  # @spec INVARIANT-1
+  test "reports malformed invariant headers" do
+    for header <- ["invariant on_or_off do", "invariant \"on or off\"", "invariant \"\" do"] do
+      source = """
+      model Light
+        state value = :off
+
+        #{header}
+          value == :on
+        end
+      end
+      """
+
+      assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+      assert error.message =~ "expected invariant declaration"
+    end
+  end
+
+  # @spec INVARIANT-1
+  test "reports an empty invariant body" do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "empty" do
+      end
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+    assert error.message =~ "missing expression in invariant \"empty\""
+    assert error.line == 4
+  end
+
+  # @spec INVARIANT-1
+  test "rejects invariant bodies with multiple expressions" do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "two expressions" do
+        value == :on
+        value == :off
+      end
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+    assert error.message =~ "invariant \"two expressions\" must be a single expression"
+    assert error.line == 6
+  end
+
+  # @spec INVARIANT-1
+  test "rejects invariant declarations outside a model" do
+    source = """
+    invariant "stray" do
+      true
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+
+    assert error.message =~ "invariant declarations are only allowed inside a model"
+  end
+
+  # @spec INVARIANT-1
+  test "rejects dot calls in invariant conditions" do
+    source = """
+    model Light
+      state value = :off
+
+      invariant "no calls" do
+        state.value()
+      end
+    end
+    """
+
+    assert {:error, %Yup.SourceError{} = error} = Yup.Parser.parse(source, path: "model.yup")
+    assert error.message =~ "dot calls are not supported in model expressions"
   end
 
   # ── type annotations ──────────────────────────────────────────────

@@ -18,6 +18,7 @@ defmodule Yup.Parser do
     FieldAccess,
     Function,
     Identifier,
+    Invariant,
     ListLiteral,
     Literal,
     LiteralPattern,
@@ -124,6 +125,14 @@ defmodule Yup.Parser do
 
         {record, after_record} = parse_record(line, text, rest, path)
         parse_forms(after_record, path, [record | acc], scope)
+
+      String.starts_with?(trimmed, "invariant ") or trimmed == "invariant" ->
+        raise source_error(
+                path,
+                line,
+                1,
+                "invariant declarations are only allowed inside a model"
+              )
 
       String.starts_with?(trimmed, "match ") or trimmed == "match" ->
         {match, after_match} = parse_match(line, text, rest, path)
@@ -408,7 +417,15 @@ defmodule Yup.Parser do
     if String.trim(end_text) == "end" do
       states = Enum.filter(body, &match?(%ModelState{}, &1))
       transitions = Enum.filter(body, &match?(%Transition{}, &1))
-      {%Model{name: name, states: states, transitions: transitions, loc: loc(line, 1)}, remaining}
+      invariants = Enum.filter(body, &match?(%Invariant{}, &1))
+
+      {%Model{
+         name: name,
+         states: states,
+         transitions: transitions,
+         invariants: invariants,
+         loc: loc(line, 1)
+       }, remaining}
     else
       raise "internal parser error: model close called without end"
     end
@@ -439,8 +456,12 @@ defmodule Yup.Parser do
         {transition, after_transition} = parse_transition(line, text, rest, path)
         parse_model_body(after_transition, path, [transition | acc])
 
+      String.starts_with?(trimmed, "invariant ") or trimmed == "invariant" ->
+        {invariant, after_invariant} = parse_invariant(line, text, rest, path)
+        parse_model_body(after_invariant, path, [invariant | acc])
+
       true ->
-        raise source_error(path, line, 1, "expected state or transition inside model")
+        raise source_error(path, line, 1, "expected state, transition, or invariant inside model")
     end
   end
 
@@ -485,6 +506,78 @@ defmodule Yup.Parser do
 
   defp close_transition([], name, line, path, _body) do
     raise source_error(path, line, 1, "missing end for transition #{name}")
+  end
+
+  # ── invariant declarations ─────────────────────────────────────────
+
+  # @spec INVARIANT-1
+  defp parse_invariant(line, text, rest, path) do
+    trimmed = String.trim(text)
+
+    case Regex.run(~r/^invariant\s+"([^"]+)"\s+do\s*$/, trimmed) do
+      [_, name] ->
+        {body, after_body} = parse_invariant_body(rest, path, [])
+        close_invariant(after_body, name, line, path, body)
+
+      _ ->
+        raise source_error(
+                path,
+                line,
+                1,
+                "expected invariant declaration like invariant \"valid value\" do"
+              )
+    end
+  end
+
+  defp close_invariant([{_end_line, end_text} | remaining], name, line, path, body) do
+    if String.trim(end_text) == "end" do
+      condition = invariant_condition(name, line, path, body)
+
+      {%Invariant{name: name, condition: condition, loc: loc(line, 1)}, remaining}
+    else
+      raise "internal parser error: invariant close called without end"
+    end
+  end
+
+  defp close_invariant([], name, line, path, _body) do
+    raise source_error(path, line, 1, "missing end for invariant \"#{name}\"")
+  end
+
+  defp invariant_condition(name, _header_line, path, [{line, text} | extra]) do
+    if extra != [] do
+      {next_line, _} = hd(extra)
+
+      raise source_error(
+              path,
+              next_line,
+              1,
+              "invariant \"#{name}\" must be a single expression"
+            )
+    end
+
+    parse_model_expression(text, line, path)
+  end
+
+  defp invariant_condition(name, header_line, path, []) do
+    raise source_error(path, header_line, 1, "missing expression in invariant \"#{name}\"")
+  end
+
+  defp parse_invariant_body([], _path, acc), do: {Enum.reverse(acc), []}
+
+  defp parse_invariant_body([{line, raw} | rest] = lines, path, acc) do
+    text = strip_comment(raw)
+    trimmed = String.trim(text)
+
+    cond do
+      blank?(text) ->
+        parse_invariant_body(rest, path, acc)
+
+      trimmed == "end" ->
+        {Enum.reverse(acc), lines}
+
+      true ->
+        parse_invariant_body(rest, path, [{line, trimmed} | acc])
+    end
   end
 
   defp parse_transition_body([], _path, acc), do: {Enum.reverse(acc), []}
